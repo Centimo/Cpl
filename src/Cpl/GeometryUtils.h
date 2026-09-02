@@ -718,7 +718,7 @@ namespace Cpl
     template <class T, template<class> class TPoint> 
     CPL_INLINE TPoint<T> ProjectionToLine(const TPoint<T> & a, const TPoint<T> & b, const TPoint<T> & c)
     {
-        if (SquareDistance(b, c) < 1)
+        if (SquaredDistance(b, c) < 1)
         {
             return b;
         }
@@ -744,9 +744,9 @@ namespace Cpl
     * \return Squared distance between a and ProjectionToLine(a, b, c).
     */
     template <class T, template<class> class TPoint>
-    CPL_INLINE T SquareDistanceToLine(const TPoint<T> & a, const TPoint<T> & b, const TPoint<T> & c)
+    CPL_INLINE T SquaredDistanceToLine(const TPoint<T> & a, const TPoint<T> & b, const TPoint<T> & c)
     {
-        return SquareDistance(a, ProjectionToLine(a, b, c));
+        return SquaredDistance(a, ProjectionToLine(a, b, c));
     }
 
     /*! @ingroup cpl_geometry

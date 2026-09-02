@@ -244,7 +244,7 @@ namespace Cpl
                 Map::iterator it = _map.find(xmlFirst->Value());
                 if (it == _map.end())
                 {
-                    CPL_LOG_SS(Debug, "Load XML has unknown propery '" << xmlFirst->Value() << "'!")
+                    CPL_LOG_SS(Debug, "Load XML has unknown propery '" << xmlFirst->Value() << "'!");
                     continue;
                 }
                 Xml::XmlNode<char>* xmlSecond = xmlItem->FirstNode("second");

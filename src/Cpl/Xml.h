@@ -711,17 +711,17 @@ namespace Cpl
             }
 
             /*!
-            * \fn XmlDocument<Ch> * document() const
+            * \fn XmlDocument<Ch> * Document() const
             * \brief Walks parent pointers to the document root.
             * \return The ancestor of type NodeDocument, or NULL when this attribute is detached
             *         or the root is not an XmlDocument.
             */
-            XmlDocument<Ch> *document() const
+            XmlDocument<Ch> *Document() const
             {
-                if (XmlNode<Ch> *node = this->parent())
+                if (XmlNode<Ch> *node = this->Parent())
                 {
-                    while (node->parent())
-                        node = node->parent();
+                    while (node->Parent())
+                        node = node->Parent();
                     return node->Type() == NodeDocument ? static_cast<XmlDocument<Ch> *>(node) : 0;
                 }
                 else
@@ -828,8 +828,8 @@ namespace Cpl
             XmlDocument<Ch> * Document() const
             {
                 XmlNode<Ch> *node = const_cast<XmlNode<Ch> *>(this);
-                while (node->parent())
-                    node = node->parent();
+                while (node->Parent())
+                    node = node->Parent();
                 return node->Type() == NodeDocument ? static_cast<XmlDocument<Ch> *>(node) : 0;
             }
 
@@ -1001,7 +1001,7 @@ namespace Cpl
             */
             void PrependNode(XmlNode<Ch> *child)
             {
-                assert(child && !child->parent() && child->Type() != NodeDocument);
+                assert(child && !child->Parent() && child->Type() != NodeDocument);
                 if (FirstNode())
                 {
                     child->_nextSibling = _firstNode;
@@ -1048,8 +1048,8 @@ namespace Cpl
             */
             void InsertNode(XmlNode<Ch> *where, XmlNode<Ch> *child)
             {
-                assert(!where || where->parent() == this);
-                assert(child && !child->parent() && child->Type() != NodeDocument);
+                assert(!where || where->Parent() == this);
+                assert(child && !child->Parent() && child->Type() != NodeDocument);
                 if (where == _firstNode)
                     PrependNode(child);
                 else if (where == 0)
@@ -1110,7 +1110,7 @@ namespace Cpl
             */
             void RemoveNode(XmlNode<Ch> *where)
             {
-                assert(where && where->parent() == this);
+                assert(where && where->Parent() == this);
                 assert(FirstNode());
                 if (where == _firstNode)
                     RemoveFirstNode();
@@ -1143,7 +1143,7 @@ namespace Cpl
             */
             void PrependAttribute(XmlAttribute<Ch> *attribute)
             {
-                assert(attribute && !attribute->parent());
+                assert(attribute && !attribute->Parent());
                 if (FirstAttribute())
                 {
                     attribute->_nextAttribute = _firstAttribute;
@@ -1190,8 +1190,8 @@ namespace Cpl
             */
             void InsertAttribute(XmlAttribute<Ch> *where, XmlAttribute<Ch> *attribute)
             {
-                assert(!where || where->parent() == this);
-                assert(attribute && !attribute->parent());
+                assert(!where || where->Parent() == this);
+                assert(attribute && !attribute->Parent());
                 if (where == _firstAttribute)
                     PrependAttribute(attribute);
                 else if (where == 0)
@@ -1251,7 +1251,7 @@ namespace Cpl
             */
             void RemoveAttribute(XmlAttribute<Ch> *where)
             {
-                assert(FirstAttribute() && where->parent() == this);
+                assert(FirstAttribute() && where->Parent() == this);
                 if (where == _firstAttribute)
                     RemoveFirstAttribute();
                 else if (where == _lastAttribute)

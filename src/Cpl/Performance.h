@@ -503,12 +503,6 @@ namespace Cpl
         typedef std::map<String, PmPtr> FunctionMap;
 
         /*!
-        * \var s_storage
-        * \brief Static storage instance.
-        */
-        static PerformanceStorage s_storage;
-
-        /*!
         * \fn PerformanceStorage()
         * \brief Constructs an empty storage with no thread maps.
         */

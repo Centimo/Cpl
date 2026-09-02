@@ -403,7 +403,7 @@ namespace Cpl
 * \param msg - Message string.
 */
 #define CPL_LOG(level, msg) \
-    Cpl::Log::Global().Write(Cpl::Log::level, msg);
+    Cpl::Log::Global().Write(Cpl::Log::level, msg)
 
 /*! @ingroup cpl_log
 * \def CPL_LOG_ID(level, msg, id)
@@ -413,7 +413,7 @@ namespace Cpl
 * \param id - Writer identifier returned by AddWriter, AddStdWriter or AddFileWriter.
 */
 #define CPL_LOG_ID(level, msg, id) \
-    Cpl::Log::Global().Write(Cpl::Log::level, msg, id);
+    Cpl::Log::Global().Write(Cpl::Log::level, msg, id)
 
 /*! @ingroup cpl_log
 * \def CPL_LOG_SS(level, msg)
@@ -422,11 +422,12 @@ namespace Cpl
 * \param msg - Stream expression, for example "value = " << value.
 */
 #define CPL_LOG_SS(level, msg) \
+    do \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str()); \
-    }
+        std::stringstream cplLogStream; \
+        cplLogStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogStream.str()); \
+    } while (0)
 
 /*! @ingroup cpl_log
 * \def CPL_LOG_SS_ID(level, msg, id)
@@ -436,11 +437,12 @@ namespace Cpl
 * \param id - Writer identifier returned by AddWriter, AddStdWriter or AddFileWriter.
 */
 #define CPL_LOG_SS_ID(level, msg, id) \
+    do \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str(), id); \
-    }
+        std::stringstream cplLogStream; \
+        cplLogStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogStream.str(), id); \
+    } while (0)
 
 /*! @ingroup cpl_log
 * \def CPL_IF_LOG_SS(cond, level, msg)
@@ -450,12 +452,15 @@ namespace Cpl
 * \param msg - Stream expression, for example "value = " << value.
 */
 #define CPL_IF_LOG_SS(cond, level, msg) \
-    if(cond) \
+    do \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str()); \
-    }
+        if (cond) \
+        { \
+            std::stringstream cplLogStream; \
+            cplLogStream << msg; \
+            Cpl::Log::Global().Write(Cpl::Log::level, cplLogStream.str()); \
+        } \
+    } while (0)
 
 /*! @ingroup cpl_log
 * \def CPL_IF_LOG_SS_ID(cond, level, msg, id)
@@ -466,12 +471,15 @@ namespace Cpl
 * \param id - Writer identifier returned by AddWriter, AddStdWriter or AddFileWriter.
 */
 #define CPL_IF_LOG_SS_ID(cond, level, msg, id) \
-    if(cond) \
+    do \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str(), id); \
-    }
+        if (cond) \
+        { \
+            std::stringstream cplLogStream; \
+            cplLogStream << msg; \
+            Cpl::Log::Global().Write(Cpl::Log::level, cplLogStream.str(), id); \
+        } \
+    } while (0)
 
 #else
 
