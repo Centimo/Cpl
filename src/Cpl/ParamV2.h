@@ -71,7 +71,7 @@ namespace Cpl
 
                     int count = 0;
                     Cpl::ToVal(countNode->Value(), count);
-                    if (count != itemCount)
+                    if (count < 0 || static_cast<size_t>(count) != itemCount)
                         return false;
                 }
                 else if (itemCount != childrenCount)
@@ -79,7 +79,6 @@ namespace Cpl
                 Cpl::ParamVector<T>::Resize(itemCount);
                 Xml::XmlNode<char>* xmlItem = xmlCurrent->FirstNode(itemName.c_str(), itemName.size());
 
-                size_t size = Cpl::ParamVector<T>::Size();
                 for (size_t i = 0; i < itemCount; ++i)
                 {
                     Unknown* paramChild = Cpl::ParamVector<T>::ChildBeg(i);
@@ -87,7 +86,7 @@ namespace Cpl
                     for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                     {
                         if (!paramChild->LoadNodeXml(xmlItem))
-                            return true;
+                            return false;
                     }
                     xmlItem = xmlItem->NextSibling(itemName.c_str(), itemName.size());
                 }
@@ -164,7 +163,7 @@ namespace Cpl
 
                     int count = 0;
                     Cpl::ToVal(countNode->Value(), count);
-                    if (count != itemCount)
+                    if (count < 0 || static_cast<size_t>(count) != itemCount)
                         return false;
                 }
                 else if (itemCount != childrenCount)
@@ -187,7 +186,7 @@ namespace Cpl
                             for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                             {
                                 if (!paramChild->LoadNodeXml(xmlValue))
-                                    return true;
+                                    return false;
                             }
                         }
                     }

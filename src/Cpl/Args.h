@@ -176,8 +176,9 @@ namespace Cpl
                                 std::cout << " }." << std::endl;
                                 ::exit(1);
                             }
-                        }                        
+                        }
                         values.push_back(value);
+                        break;
                     }
                 }
             }

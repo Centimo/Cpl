@@ -94,6 +94,10 @@ namespace
         if (*first == '*' && firstLen != 1 && secondLen == 0)
             return false;
 
+        // A '?' needs a character of second to consume; without one both pointers would run past their strings.
+        if (*first == '?' && secondLen == 0)
+            return false;
+
         // If the first string contains '?', or current characters
         // of both strings match
         if (*first == '?' || *first == *second)
@@ -162,7 +166,7 @@ namespace Cpl
         }
 
         std::advance(iter, separator.size());
-        while (std::memcmp(separator.c_str(), iter.operator->(), separator.size()) == 0 || *iter == ' ')
+        while (iter != path.rend() && (std::memcmp(separator.c_str(), iter.operator->(), separator.size()) == 0 || *iter == ' '))
             iter++;
         return path.substr(0, std::distance(iter, path.rend()));;
     }
@@ -828,13 +832,13 @@ namespace Cpl
     CPL_INLINE bool DeleteDirectory(const String& dir)
     {
 #ifdef CPL_FILE_USE_FILESYSTEM
-        try 
+        try
         {
             std::error_code code;
-            auto ret = fs::remove_all(dir);
-            return !code && ret != -1;
+            auto ret = fs::remove_all(dir, code);
+            return !code && ret != static_cast<decltype(ret)>(-1);
         }
-        catch (...) 
+        catch (...)
         {
         }
         return 0;
@@ -903,11 +907,15 @@ namespace Cpl
 			ifs.open(path, std::ios::in | std::ios::binary);
 			if (!ifs.fail())
 			{
-				std::ifstream::pos_type pos = 0;
 				if (ifs.seekg(0, std::ios::end))
-					pos = ifs.tellg();
-				size = pos;
-				return true;
+				{
+					std::ifstream::pos_type pos = ifs.tellg();
+					if (pos >= 0)
+					{
+						size = pos;
+						return true;
+					}
+				}
 			}
 		}
 		return false;
@@ -1142,6 +1150,7 @@ namespace Cpl
             }
             catch (...) {
             }
+            _size = 0;
             return false;
         }
 
@@ -1170,14 +1179,16 @@ namespace Cpl
                 fl |= std::ios::app;
 
             fs.open(filePath, fl);
-            if (!fs.fail()) 
+            if (!fs.fail())
             {
                 fs.write(data, size);
+                bool written = !fs.fail();
                 fs.close();
-                return -1;
+                if (written && !fs.fail())
+                    return -1;
             }
         }
-        catch (...) 
+        catch (...)
         {
         }
 
@@ -1212,10 +1223,12 @@ namespace Cpl
                 if (!ifs.seekg(0, std::ios::end))
                     return FileData::Error::FailedToGetInfo;
 
-                size_t end = ifs.tellg();
-                size_t size = end - startPos;
+                std::streamoff end = ifs.tellg();
+                if (end < 0 || startPos > static_cast<size_t>(end))
+                    return FileData::Error::FailedToGetInfo;
+                size_t size = static_cast<size_t>(end) - startPos;
 
-                if ( size > maxSize) 
+                if ( size > maxSize)
                 {
                     size = maxSize;
                     partial = true;
@@ -1223,8 +1236,13 @@ namespace Cpl
 
                 FileData readed(size, out._type);
 
-                if (size && ifs.seekg(startPos)) 
+                if (size && !readed.data())
+                    return FileData::Error::FailedToRead;
+
+                if (size)
                 {
+                    if (!ifs.seekg(startPos))
+                        return FileData::Error::FailedToGetInfo;
                     ifs.read((char*) readed._holder.get(), readed.size());
                     if (ifs.fail())
                         return FileData::Error::FailedToRead;
@@ -1250,18 +1268,23 @@ namespace Cpl
     */
     template<class T> CPL_INLINE bool LoadBinaryData(const String& path, std::vector<T>& data)
     {
+        if (!FileExists(path))
+            return false;
         std::ifstream ifs(path.c_str(), std::ofstream::binary);
         if (!ifs.is_open())
             return false;
-        size_t beg = ifs.tellg();
+        std::streamoff beg = ifs.tellg();
         ifs.seekg(0, std::ios::end);
-        size_t end = ifs.tellg();
+        std::streamoff end = ifs.tellg();
         ifs.seekg(0, std::ios::beg);
-        size_t size = (end - beg) / sizeof(T);
+        if (beg < 0 || end < beg || !ifs.good())
+            return false;
+        size_t size = (size_t)(end - beg) / sizeof(T);
         data.resize(size);
         ifs.read((char*)data.data(), size * sizeof(T));
+        bool ok = !ifs.fail();
         ifs.close();
-        return true;
+        return ok;
     }
 
     /*! @ingroup cpl_file

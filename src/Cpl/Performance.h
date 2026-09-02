@@ -31,6 +31,7 @@
 
 #include <mutex>
 #include <map>
+#include <unordered_map>
 #include <thread>
 #include <memory>
 
@@ -64,11 +65,11 @@ namespace Cpl
 
         CPL_INLINE void Expand()
         {
-            size_t o = 0;
-            for (size_t i = 0; i < _histogram.size(); i += 2, o += 1)
-                _histogram[o] = _histogram[i + 0] + _histogram[i + 1];
-            for (; o < _histogram.size(); o += 1)
-                _histogram[0] = 0;
+            size_t target = 0;
+            for (size_t source = 0; source < _histogram.size(); source += 2, target += 1)
+                _histogram[target] = _histogram[source + 0] + _histogram[source + 1];
+            for (; target < _histogram.size(); target += 1)
+                _histogram[target] = 0;
             _shift++;
             _max *= 2;
         }
@@ -152,7 +153,13 @@ namespace Cpl
                 total += _histogram[i];
             uint64_t threshold = uint64_t(quantile * total / 100.0), lower = 0, upper = 0;
             size_t index = 0;
-            for (; index < _histogram.size() && upper < threshold; index++, lower = upper, upper += _histogram[index]);
+            for (; index < _histogram.size(); index++)
+            {
+                lower = upper;
+                upper += _histogram[index];
+                if (upper >= threshold)
+                    break;
+            }
             uint64_t step = uint64_t(1) << _shift;
             if (index == _histogram.size())
                 return Miliseconds(_histogram.size() * step);
@@ -176,6 +183,7 @@ namespace Cpl
         String	_name;
         int64_t _start, _current, _total, _min, _max;
         int64_t _count, _flop;
+        uint32_t _hist;
         bool _entered, _paused;
         PerformanceHistogram _histogram;
 
@@ -196,6 +204,7 @@ namespace Cpl
             , _total(0)
             , _min(std::numeric_limits<int64_t>::max())
             , _max(std::numeric_limits<int64_t>::min())
+            , _hist(hist)
             , _entered(false)
             , _paused(false)
             , _histogram(hist)
@@ -216,6 +225,7 @@ namespace Cpl
             , _total(pm._total)
             , _min(pm._min)
             , _max(pm._max)
+            , _hist(pm._hist)
             , _entered(pm._entered)
             , _paused(pm._paused)
             , _histogram(pm._histogram)
@@ -280,6 +290,25 @@ namespace Cpl
             _max = std::max(_max, other._max);
             if (_histogram.Enable())
                 _histogram.Merge(other._histogram);
+        }
+
+        /*!
+        * \fn void Reset()
+        * \brief Clears the accumulated statistics, keeping identity, name, flop count and histogram bin count.
+        * \note Resets in place instead of destroying the object, so a pointer obtained from PerformanceStorage
+        *       before the reset stays valid afterwards.
+        */
+        CPL_INLINE void Reset()
+        {
+            _start = 0;
+            _current = 0;
+            _total = 0;
+            _min = std::numeric_limits<int64_t>::max();
+            _max = std::numeric_limits<int64_t>::min();
+            _count = 0;
+            _entered = false;
+            _paused = false;
+            _histogram = PerformanceHistogram(_hist);
         }
 
         /*!
@@ -484,6 +513,7 @@ namespace Cpl
         * \brief Constructs an empty storage with no thread maps.
         */
         PerformanceStorage()
+            : _alive(std::make_shared<int>(0))
         {
         }
 
@@ -573,13 +603,16 @@ namespace Cpl
 
         /*!
         * \fn void Clear()
-        * \brief Removes every thread-local measurer.
+        * \brief Resets the accumulated statistics of every thread-local measurer.
+        * \note Measurers are reset in place, not destroyed, so a pointer previously returned by Get()
+        *       stays valid after Clear() is called.
         */
         void Clear()
         {
             std::lock_guard<std::mutex> lock(_mutex);
             for (ThreadMap::iterator thread = _map.begin(); thread != _map.end(); ++thread)
-                thread->second.clear();
+                for (FunctionMap::iterator function = thread->second.begin(); function != thread->second.end(); ++function)
+                    function->second->Reset();
         }
 
         /*!
@@ -616,16 +649,36 @@ namespace Cpl
 
         ThreadMap _map;
         mutable std::mutex _mutex;
+        // Liveness token: a thread-local cache entry made for a storage that was destroyed (and possibly
+        // replaced by another one at the same address) expires together with it.
+        std::shared_ptr<int> _alive;
+
+        struct ThreadCacheEntry
+        {
+            std::weak_ptr<int> alive;
+            FunctionMap* map;
+        };
+        typedef std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> ThreadCache;
 
         CPL_INLINE FunctionMap& ThisThread()
         {
-            static thread_local FunctionMap* thread = NULL;
-            if (thread == NULL)
+            static thread_local ThreadCache cache;
+            ThreadCache::iterator it = cache.find(this);
+            if (it != cache.end() && !it->second.alive.expired())
+                return *it->second.map;
+            for (ThreadCache::iterator stale = cache.begin(); stale != cache.end();)
             {
-                std::lock_guard<std::mutex> lock(_mutex);
-                thread = &_map[std::this_thread::get_id()];
+                if (stale->second.alive.expired())
+                    stale = cache.erase(stale);
+                else
+                    ++stale;
             }
-            return *thread;
+            std::lock_guard<std::mutex> lock(_mutex);
+            ThreadCacheEntry entry;
+            entry.alive = _alive;
+            entry.map = &_map[std::this_thread::get_id()];
+            cache[this] = entry;
+            return *entry.map;
         }
     };
 }

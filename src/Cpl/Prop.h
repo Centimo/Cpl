@@ -99,7 +99,10 @@ namespace Cpl
         {
         }
 
-        bool LoadNodeXml(Xml::XmlNode<char>* xmlParent) override
+        // Inside a ParamStruct a property is saved and loaded like any ParamLimited (<name>value</name>);
+        // the descriptive layout below is written only by ParamStorage, under a node of its own per property.
+
+        virtual bool LoadBodyXml(Xml::XmlNode<char>* xmlParent)
         {
             Xml::XmlNode<char>* xmlValue = xmlParent->FirstNode("value");
             if(xmlValue)
@@ -112,7 +115,7 @@ namespace Cpl
             return value.empty() ? " " : value.c_str();
         }
 
-        void SaveNodeXml(Xml::XmlDocument<char>& xmlDoc, Xml::XmlNode<char>* xmlParent, bool full) const override
+        virtual void SaveBodyXml(Xml::XmlDocument<char>& xmlDoc, Xml::XmlNode<char>* xmlParent) const
         {
             Xml::XmlNode<char>* xmlValue = xmlDoc.AllocateNode(Xml::NodeElement, xmlDoc.AllocateString("value"));
             xmlValue->Value(xmlDoc.AllocateString(NotEmpty(Cpl::ToStr(this->_value))));
@@ -202,7 +205,7 @@ namespace Cpl
         ParamStorage(const String& name)
             : Base(name)
         {
-            for (Unknown* group = this->ChildBeg(); group < this->End(); group = group->End())
+            for (Unknown* group = this->ChildBeg(); group < this->ChildEnd(); group = group->End())
             {
                 for (Unknown* prop = ((UnknownGroup*)group)->ChildBeg(); prop < group->End(); prop = prop->End())
                 {
@@ -210,6 +213,19 @@ namespace Cpl
                     _map[name] = (UnknownProp*)prop;
                 }
             }
+        }
+
+        // _map holds raw pointers into this object's own group/property subobjects; a copy would
+        // keep pointing into the original (or, once destroyed, into freed memory). Forbid copying
+        // instead of allowing a Storage that silently aliases another one.
+        ParamStorage(const ParamStorage&) = delete;
+        ParamStorage& operator = (const ParamStorage&) = delete;
+
+        // The object is larger than ParamStruct<T> by _map; a parent walking its children by End()
+        // must skip the whole object.
+        Unknown* End() const override
+        {
+            return (Unknown*)(this + 1);
         }
 
         bool LoadNodeXml(Xml::XmlNode<char>* xmlParent) override
@@ -234,7 +250,7 @@ namespace Cpl
                 Xml::XmlNode<char>* xmlSecond = xmlItem->FirstNode("second");
                 if (xmlSecond == NULL)
                     return false;
-                if (!it->second->LoadNodeXml(xmlSecond))
+                if (!it->second->LoadBodyXml(xmlSecond))
                     return false;
             }
             return true;
@@ -269,7 +285,7 @@ namespace Cpl
                     xmlItem->AppendNode(xmlFirst);
 
                     Xml::XmlNode<char>* xmlSecond = xmlDoc.AllocateNode(Xml::NodeElement, xmlDoc.AllocateString("second"));
-                    it->second->SaveNodeXml(xmlDoc, xmlSecond, true);
+                    it->second->SaveBodyXml(xmlDoc, xmlSecond);
                     xmlItem->AppendNode(xmlSecond);
 
                     xmlMap->AppendNode(xmlItem);
@@ -319,10 +335,10 @@ struct Param_##name : public Cpl::ParamProp<type> \
 struct Param_##name : public Cpl::ParamProp<type> \
 { \
     typedef Cpl::ParamProp<type> Base; \
-    Param_##name() : Base(#name) { assert(min <= value && value <= max); this->_value = this->Default(); } \
-    type Default() const override { return value; } \
-    type Min() const override { return min; } \
-    type Max() const override { return max; } \
+    Param_##name() : Base(#name) { assert((min) <= (value) && (value) <= (max)); this->_value = this->Default(); } \
+    type Default() const override { return (value); } \
+    type Min() const override { return (min); } \
+    type Max() const override { return (max); } \
     Cpl::String Description() const override { return descr; } \
     bool Limited() const override { return true; } \
 } name;

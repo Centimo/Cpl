@@ -96,47 +96,59 @@ namespace Cpl
         }
 
         /*!
-        * \fn void SetHeader(size_t col, const String& name, bool separator = false, Alignment alignment = Left)
+        * \fn bool SetHeader(size_t col, const String& name, bool separator = false, Alignment alignment = Left)
         * \brief Sets the name, vertical separator and alignment of a column.
         * \param [in] col - Zero-based column index.
         * \param [in] name - Header text shown in the first row.
         * \param [in] separator - If true, draw a vertical separator after this column.
         * \param [in] alignment - Horizontal alignment of the header and of the cells in this column.
+        * \return true if col is within the table, false otherwise (nothing is changed).
         */
-        void SetHeader(size_t col, const String& name, bool separator = false, Alignment alignment = Left)
+        bool SetHeader(size_t col, const String& name, bool separator = false, Alignment alignment = Left)
         {
+            if (col >= _width)
+                return false;
             _headers[col] = Header(name, separator, alignment);
+            return true;
         }
 
         /*!
-        * \fn void SetRowProp(size_t row, bool separator = false, bool bold = false)
+        * \fn bool SetRowProp(size_t row, bool separator = false, bool bold = false)
         * \brief Sets the separator and bold style of a row.
         * \param [in] row - Zero-based row index.
         * \param [in] separator - If true, draw a horizontal separator after this row in text output
         *                         (ignored for the last row).
         * \param [in] bold - If true, render the row in bold with a gray background in HTML output.
+        * \return true if row is within the table, false otherwise (nothing is changed).
         */
-        void SetRowProp(size_t row, bool separator = false, bool bold = false)
+        bool SetRowProp(size_t row, bool separator = false, bool bold = false)
         {
+            if (row >= _height)
+                return false;
             _rows[row] = RowProp(separator, bold);
+            return true;
         }
 
         /*!
-        * \fn void SetCell(size_t col, size_t row, const String& value, Color color = Black, const String & link = "")
+        * \fn bool SetCell(size_t col, size_t row, const String& value, Color color = Black, const String & link = "")
         * \brief Sets the value, color and optional hyperlink of a cell.
         * \param [in] col - Zero-based column index.
         * \param [in] row - Zero-based row index.
         * \param [in] value - Cell text. Also used to grow the column width for text output.
         * \param [in] color - Cell text color. Black by default.
         * \param [in] link - Optional URL. If not empty, HTML output wraps the cell text in an anchor.
+        * \return true if col and row are within the table, false otherwise (nothing is changed).
         */
-        void SetCell(size_t col, size_t row, const String& value, Color color = Black, const String & link = "")
+        bool SetCell(size_t col, size_t row, const String& value, Color color = Black, const String & link = "")
         {
+            if (col >= _width || row >= _height)
+                return false;
             Cell& cell = _cells[row * _width + col];
             cell.value = value;
             cell.color = color;
             cell.link = link;
             _headers[col].width = std::max(_headers[col].width, value.size());
+            return true;
         }
 
         /*!
@@ -222,7 +234,6 @@ namespace Cpl
             attributes.push_back(Html::Attribute("cellpadding", "2"));
             attributes.push_back(Html::Attribute("cellspacing", "0"));
             attributes.push_back(Html::Attribute("border", "1"));
-            attributes.push_back(Html::Attribute("cellpadding", "2"));
             attributes.push_back(Html::Attribute("width", "100%"));
             attributes.push_back(Html::Attribute("style", "border-collapse:collapse"));
             html.WriteBegin("table", attributes, true, true);
@@ -244,7 +255,7 @@ namespace Cpl
                 else
                     html.WriteValue("th", Html::Attr("class", AlignmentClass(h.alignment, false, ignoreAlignment) + (h.separator ? " sep" : " non")), h.name, false);
             }
-            html.WriteEnd("tr", true, false);
+            html.WriteEnd("tr", false, false);
             html.WriteEnd("thead", false, true);
 
             html.WriteBegin("tbody", Html::Attr(), true, true);

@@ -204,7 +204,8 @@ namespace Cpl
         {
             if (indent)
             {
-                _indent--;
+                if (_indent > 0)
+                    _indent--;
                 if (_line)
                     WriteIndent();
             }

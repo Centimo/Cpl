@@ -30,6 +30,7 @@
 
 #include <mutex>
 #include <map>
+#include <deque>
 #include <thread>
 
 #if defined(CPL_LOG_ENABLE)
@@ -182,14 +183,18 @@ namespace Cpl
         */
         int AddFileWriter(Level level, const String& fileName)
         {
+            std::ofstream* file = NULL;
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                _files.emplace_back(std::ofstream(fileName));
+                _files.emplace_back(fileName);
+                if (!_files.back().is_open())
+                {
+                    _files.pop_back();
+                    return 0;
+                }
+                file = &_files.back();
             }
-            if (_files.back().is_open())
-                return AddWriter(level, FileWrite, &_files.back());
-            else
-                return 0;
+            return AddWriter(level, FileWrite, file);
         }
 
         /*!
@@ -372,7 +377,7 @@ namespace Cpl
 
         mutable std::mutex _mutex;
         mutable std::map<std::thread::id, String> _prettyThreadNames;
-        mutable std::vector<std::ofstream> _files;
+        mutable std::deque<std::ofstream> _files;
         Level _levelMax;
         Flags _flags;
         bool _rawOnly;

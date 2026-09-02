@@ -32,6 +32,8 @@
 #include "Cpl/Yaml.h"
 #include "Cpl/File.h"
 
+#include <cstdlib>
+
 namespace Cpl
 {
     /*! @ingroup cpl_param
@@ -53,6 +55,17 @@ namespace Cpl
     {
         static const char* names[] = { "XML", "YAML", "Auto detection by file extension" };
         return format >= ParamFormatXml && format <= ParamFormatByExt ? names[format] : "";
+    }
+
+    /*! @ingroup cpl_param
+    * \brief Checks whether a YAML node can be indexed by key without being destroyed.
+    * \param [in] node - Node a Param is about to load itself from.
+    * \return true if node is empty or already a map. Yaml::Node::operator[](key) turns any other
+    *         node type into a map, discarding its content, so loading from it must be refused.
+    */
+    CPL_INLINE bool IsYamlMapOrEmpty(const Yaml::Node& node)
+    {
+        return node.Type() == Yaml::Node::None || node.Type() == Yaml::Node::MapType;
     }
 
     //---------------------------------------------------------------------------------------------
@@ -444,6 +457,8 @@ namespace Cpl
 
         bool LoadNodeYaml(Yaml::Node& node) override
         {
+            if (!IsYamlMapOrEmpty(node))
+                return false;
             Yaml::Node & current = node[this->Name()];
             if (current.Type() != Yaml::Node::None)
             {
@@ -548,13 +563,24 @@ namespace Cpl
         typedef T Type; //!< Stored value type.
 
         /*!
-        * \fn ParamValidator<Type> operator () () const
+        * \fn ParamValidator<Type> operator () ()
         * \brief Returns a validator bound to the stored value, Default(), Min() and Max().
         * \return ParamValidator that reads the current value and validates assignments.
         */
-        CPL_INLINE ParamValidator<Type> operator () () const
-        { 
-            return ParamValidator<Type>((Type&) this->_value, this->Default(), this->Min(), this->Max()); 
+        CPL_INLINE ParamValidator<Type> operator () ()
+        {
+            return ParamValidator<Type>(this->_value, this->Default(), this->Min(), this->Max());
+        }
+
+        /*!
+        * \fn const Type& operator () () const
+        * \brief Returns a read-only reference to the stored value. Cannot be used to assign,
+        *        unlike the non-const overload, so a const ParamLimited stays immutable.
+        * \return Const reference to the current value.
+        */
+        CPL_INLINE const Type& operator () () const
+        {
+            return this->_value;
         }
 
         /*!
@@ -600,6 +626,8 @@ namespace Cpl
 
         bool LoadNodeYaml(Yaml::Node& node) override
         {
+            if (!IsYamlMapOrEmpty(node))
+                return false;
             Yaml::Node& current = node[this->Name()];
             if (current.Type() != Yaml::Node::None)
             {
@@ -632,7 +660,7 @@ namespace Cpl
         */
         bool Changed() const override
         {
-            for (const Unknown* child = this->ChildBeg(); child < this->End(); child = child->End())
+            for (const Unknown* child = this->ChildBeg(); child < this->ChildEnd(); child = child->End())
             {
                 if (child->Changed())
                     return true;
@@ -649,9 +677,9 @@ namespace Cpl
         {
         }
 
-        Unknown* End() const override 
-        {   
-            return (Unknown*)(this + 1); 
+        Unknown* End() const override
+        {
+            return ChildEnd();
         }
 
         CPL_INLINE Unknown* ChildBeg() const
@@ -659,15 +687,22 @@ namespace Cpl
             return (Unknown*)(&this->_value); 
         }
 
+        // End of the children stored in _value. Not virtual: a derived class that appends its own
+        // fields (ParamStorage) overrides End() to cover them, but its children still end here.
+        CPL_INLINE Unknown* ChildEnd() const
+        {
+            return (Unknown*)(this + 1);
+        }
+
         bool EqualNode(const Unknown* other) const override
         {
             const ParamStruct* that = (ParamStruct*)other;
             for (Unknown* tc = this->ChildBeg(), *oc = that->ChildBeg();; tc = tc->End(), oc = oc->End())
             {
-                if (tc >= this->End())
-                    return oc >= that->End();
-                if (oc >= that->End())
-                    return tc >= this->End();
+                if (tc >= this->ChildEnd())
+                    return oc >= that->ChildEnd();
+                if (oc >= that->ChildEnd())
+                    return tc >= this->ChildEnd();
                 if (!tc->EqualNode(oc))
                     return false;
             }
@@ -677,7 +712,7 @@ namespace Cpl
         void CloneNode(const Unknown * other) override
         {
             const ParamStruct* that = (ParamStruct*)other;
-            for (Unknown* tc = this->ChildBeg(), *oc = that->ChildBeg(); tc < this->End(); tc = tc->End(), oc = oc->End())
+            for (Unknown* tc = this->ChildBeg(), *oc = that->ChildBeg(); tc < this->ChildEnd(); tc = tc->End(), oc = oc->End())
                 tc->CloneNode(oc);
         }
 
@@ -686,10 +721,10 @@ namespace Cpl
             Xml::XmlNode<char>* xmlCurrent = xmlParent->FirstNode(this->Name().c_str());
             if (xmlCurrent)
             {
-                for (Unknown* paramChild = this->ChildBeg(); paramChild < this->End(); paramChild = paramChild->End())
+                for (Unknown* paramChild = this->ChildBeg(); paramChild < this->ChildEnd(); paramChild = paramChild->End())
                 {
                     if (!paramChild->LoadNodeXml(xmlCurrent))
-                        return true;
+                        return false;
                 }
             }
             return true;
@@ -698,7 +733,7 @@ namespace Cpl
         void SaveNodeXml(Xml::XmlDocument<char>& xmlDoc, Xml::XmlNode<char>* xmlParent, bool full) const override
         {
             Xml::XmlNode<char>* xmlCurrent = xmlDoc.AllocateNode(Xml::NodeElement, xmlDoc.AllocateString(this->Name().c_str()));
-            for (const Unknown* paramChild = this->ChildBeg(); paramChild < this->End(); paramChild = paramChild->End())
+            for (const Unknown* paramChild = this->ChildBeg(); paramChild < this->ChildEnd(); paramChild = paramChild->End())
             {
                 if (full || paramChild->Changed())
                     paramChild->SaveNodeXml(xmlDoc, xmlCurrent, full);
@@ -708,15 +743,17 @@ namespace Cpl
 
         bool LoadNodeYaml(Yaml::Node& node) override
         {
+            if (!IsYamlMapOrEmpty(node))
+                return false;
             Yaml::Node & current = node[this->Name()];
             if (current.Type() != Yaml::Node::None)
             {
                 if (current.Type() != Yaml::Node::MapType)
                     return false;
-                for (Unknown* paramChild = this->ChildBeg(); paramChild < this->End(); paramChild = paramChild->End())
+                for (Unknown* paramChild = this->ChildBeg(); paramChild < this->ChildEnd(); paramChild = paramChild->End())
                 {
                     if (!paramChild->LoadNodeYaml(current))
-                        return true;
+                        return false;
                 }
             }
             return true;
@@ -725,7 +762,7 @@ namespace Cpl
         void SaveNodeYaml(Yaml::Node& node, bool full) const override
         {
             Yaml::Node& current = node[this->Name()];
-            for (const Unknown* paramChild = this->ChildBeg(); paramChild < this->End(); paramChild = paramChild->End())
+            for (const Unknown* paramChild = this->ChildBeg(); paramChild < this->ChildEnd(); paramChild = paramChild->End())
             {
                 if (full || paramChild->Changed())
                     paramChild->SaveNodeYaml(current, full);
@@ -814,18 +851,21 @@ namespace Cpl
             Xml::XmlNode<char>* xmlCurrent = xmlParent->FirstNode(this->Name().c_str());
             if (xmlCurrent)
             {
+                for (Xml::XmlNode<char>* xmlCheck = xmlCurrent->FirstNode(); xmlCheck; xmlCheck = xmlCheck->NextSibling())
+                {
+                    if (ItemName() != xmlCheck->Name())
+                        return false;
+                }
                 Resize(Xml::CountChildren(xmlCurrent));
                 Xml::XmlNode<char>* xmlItem = xmlCurrent->FirstNode();
                 for (size_t i = 0; i < Size(); ++i)
                 {
-                    if (ItemName() != xmlItem->Name())
-                        return false;
                     Unknown* paramChild = this->ChildBeg(i);
                     const Unknown* paramChildEnd = this->ChildBeg(i + 1);
                     for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                     {
                         if (!paramChild->LoadNodeXml(xmlItem))
-                            return true;
+                            return false;
                     }
                     xmlItem = xmlItem->NextSibling();
                 }
@@ -853,6 +893,8 @@ namespace Cpl
 
         bool LoadNodeYaml(Yaml::Node& node) override
         {
+            if (!IsYamlMapOrEmpty(node))
+                return false;
             Yaml::Node& current = node[this->Name()];
             if (current.Type() != Yaml::Node::None)
             {
@@ -866,7 +908,7 @@ namespace Cpl
                     for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                     {
                         if (!paramChild->LoadNodeYaml(current[i]))
-                            return true;
+                            return false;
                     }
                 }
             }
@@ -964,10 +1006,12 @@ namespace Cpl
                 const Unknown* tChildEnd = this->ChildEnd(t->second);
                 for (;; oChild = oChild->End(), tChild = tChild->End())
                 {
-                    if (tChild >= tChildEnd)
-                        return oChild >= oChildEnd;
-                    if (oChild >= oChildEnd)
-                        return tChild >= tChildEnd;
+                    if (tChild >= tChildEnd || oChild >= oChildEnd)
+                    {
+                        if (tChild < tChildEnd || oChild < oChildEnd)
+                            return false;
+                        break;
+                    }
                     if (!oChild->EqualNode(tChild))
                         return false;
                 }
@@ -978,6 +1022,7 @@ namespace Cpl
         void CloneNode(const Unknown* other) override
         {
             const ParamMap* that = (ParamMap*)other;
+            this->_value.clear();
             for (typename Map::const_iterator it = that->_value.begin(); it != that->_value.end(); ++it)
             {
                 T& value = this->_value[it->first];
@@ -1015,7 +1060,7 @@ namespace Cpl
                             for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                             {
                                 if (!paramChild->LoadNodeXml(xmlValue))
-                                    return true;
+                                    return false;
                             }
                         }
                     }
@@ -1053,6 +1098,8 @@ namespace Cpl
 
         bool LoadNodeYaml(Yaml::Node& node) override
         {
+            if (!IsYamlMapOrEmpty(node))
+                return false;
             Yaml::Node& current = node[this->Name()];
             if (current.Type() != Yaml::Node::None)
             {
@@ -1070,7 +1117,7 @@ namespace Cpl
                         for (; paramChild < paramChildEnd; paramChild = paramChild->End())
                         {
                             if (!paramChild->LoadNodeYaml((*it).second))
-                                return true;
+                                return false;
                         }
                     }
                 }
@@ -1104,28 +1151,96 @@ namespace Cpl
     //---------------------------------------------------------------------------------------------
 
     /*! @ingroup cpl_param
-    * \brief Splits a comma-separated enumerator list into names. Does nothing if names is already non-empty.
-    * \param [in] data - Comma- and space-separated enumerator identifiers, typically #__VA_ARGS__
-    *                    from a CPL_PARAM_ENUM* macro.
-    * \param [in,out] names - Destination list. Left unchanged when it already has elements.
-    * \note Used by the %ToStr specialization generated for CPL_PARAM_ENUM0, CPL_PARAM_ENUM1,
-    *       CPL_PARAM_ENUM2 and CPL_PARAM_ENUM3.
+    * \brief Splits a comma-separated enumerator list into names, indexed by their numeric enum value.
+    * \param [in] data - Comma-separated enumerator identifiers, each optionally followed by "= N",
+    *                    typically #__VA_ARGS__ from a CPL_PARAM_ENUM* macro.
+    * \param [in] prefixSize - Number of leading characters removed from every identifier, the length
+    *                         of the enum type name. Every identifier must be at least that long.
+    * \param [in,out] names - Destination indexed by enumerator value; names[v] is the identifier
+    *                        whose value is v without its prefix, resized to cover the largest value
+    *                        seen. Left unchanged when it already has elements.
+    * \note Mirrors the numbering rules of a C++ enum: a name without "= N" gets the previous
+    *       value plus one, starting at 0. Used by the %ToStr specialization generated for
+    *       CPL_PARAM_ENUM0, CPL_PARAM_ENUM1, CPL_PARAM_ENUM2 and CPL_PARAM_ENUM3.
     */
-    CPL_INLINE void ParseEnumNames(const char * data, Strings & names)
+    CPL_INLINE void ParseEnumNames(const char * data, size_t prefixSize, Strings & names)
     {
         if (names.size())
             return;
+        long value = 0;
         while (*data)
         {
+            while (*data == ' ' || *data == ',')
+                data++;
             const char * beg = data;
-            while (*beg == ' ' || *beg == ',') beg++;
-            const char * end = beg;
-            while (*end && *end != ' ' && *end != ',') end++;
-            if (beg == end)
+            while (*data && *data != ' ' && *data != ',' && *data != '=')
+                data++;
+            if (beg == data)
                 break;
-            names.push_back(String(beg, end));
-            data = end;
+            String name(beg + prefixSize, data);
+
+            while (*data == ' ')
+                data++;
+            if (*data == '=')
+            {
+                data++;
+                char* valueEnd = NULL;
+                value = std::strtol(data, &valueEnd, 10);
+                data = valueEnd;
+            }
+
+            if (value >= 0)
+            {
+                const size_t index = static_cast<size_t>(value);
+                if (index >= names.size())
+                    names.resize(index + 1);
+                names[index] = name;
+            }
+            ++value;
         }
+    }
+
+    /*! @ingroup cpl_param
+    * \brief Compile-time check that a string starts with a prefix.
+    * \param [in] string - Zero-terminated string.
+    * \param [in] prefix - Zero-terminated prefix.
+    * \return true if string starts with prefix.
+    */
+    constexpr bool StartsWith(const char* string, const char* prefix)
+    {
+        return *prefix == 0 ? true : (*string == *prefix && StartsWith(string + 1, prefix + 1));
+    }
+
+    /*! @ingroup cpl_param
+    * \brief Compile-time skip of the spaces and commas that separate enumerators in a stringized list.
+    * \param [in] names - Position in the list.
+    * \return First position that is neither a space nor a comma.
+    */
+    constexpr const char* SkipEnumSeparators(const char* names)
+    {
+        return (*names == ' ' || *names == ',') ? SkipEnumSeparators(names + 1) : names;
+    }
+
+    /*! @ingroup cpl_param
+    * \brief Compile-time skip of one enumerator, including its optional "= N" part.
+    * \param [in] names - Position at the start of an enumerator.
+    * \return Position of the next comma or of the terminating zero.
+    */
+    constexpr const char* SkipEnumName(const char* names)
+    {
+        return (*names == 0 || *names == ',') ? names : SkipEnumName(names + 1);
+    }
+
+    /*! @ingroup cpl_param
+    * \brief Compile-time check that every enumerator of a stringized list starts with the enum type name.
+    * \param [in] names - Stringized enumerator list, typically #__VA_ARGS__ of a CPL_PARAM_ENUM* macro.
+    * \param [in] type - Enum type name.
+    * \return true if every enumerator starts with type. Used in a static_assert by CPL_PARAM_ENUM_CONV.
+    */
+    constexpr bool EnumNamesStartWith(const char* names, const char* type)
+    {
+        return *SkipEnumSeparators(names) == 0 ? true
+            : (StartsWith(SkipEnumSeparators(names), type) && EnumNamesStartWith(SkipEnumName(SkipEnumSeparators(names)), type));
     }
 }
 
@@ -1159,10 +1274,10 @@ struct Param_##name : public Cpl::ParamValue<type> \
 struct Param_##name : public Cpl::ParamLimited<type> \
 { \
     typedef Cpl::ParamLimited<type> Base; \
-    Param_##name() : Base(#name) { assert(min <= value && value <= max); this->_value = this->Default(); } \
-    type Default() const override { return value; } \
-    type Min() const override { return min; } \
-    type Max() const override { return max; } \
+    Param_##name() : Base(#name) { assert((min) <= (value) && (value) <= (max)); this->_value = this->Default(); } \
+    type Default() const override { return (value); } \
+    type Min() const override { return (min); } \
+    type Max() const override { return (max); } \
 } name;
 
 /*! @ingroup cpl_param
@@ -1246,17 +1361,20 @@ enum type \
 * \param type - Enumeration type name.
 * \param unknown - Suffix of the unknown sentinel, typically Unknown.
 * \param size - Suffix of the count sentinel, typically Size.
-* \param ... - Comma-separated enumerator identifiers. %ToStr strips the type name prefix from each name.
+* \param ... - Comma-separated enumerator identifiers, each optionally followed by "= N". Every identifier must start
+*              with type (checked at compile time); %ToStr returns the identifier without that prefix.
 * \note %ToVal matches names case-insensitively through Cpl::%ToEnum. Used by CPL_PARAM_ENUM0 through CPL_PARAM_ENUM3.
 */
 #define CPL_PARAM_ENUM_CONV(ns, type, unknown, size, ...) \
 namespace Cpl \
 {\
+    static_assert(Cpl::EnumNamesStartWith(#__VA_ARGS__, #type), "every enumerator of " #type " must start with " #type); \
+    \
     template<> CPL_INLINE Cpl::String ToStr<ns::type>(const ns::type& value) \
     {\
         static thread_local Cpl::Strings names; \
-        Cpl::ParseEnumNames(#__VA_ARGS__, names); \
-        return (value > ns::type##unknown && value < ns::type##size) ? names[value].substr(sizeof(#type) - 1) : Cpl::String(); \
+        Cpl::ParseEnumNames(#__VA_ARGS__, sizeof(#type) - 1, names); \
+        return (value > ns::type##unknown && value < ns::type##size) ? names[value] : Cpl::String(); \
     }\
     \
     template<> CPL_INLINE void ToVal<ns::type>(const Cpl::String& string, ns::type& value)\

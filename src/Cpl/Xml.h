@@ -33,6 +33,7 @@
 #include <iterator>
 #include <new>
 #include <exception>
+#include <type_traits>
 
 namespace Cpl
 {
@@ -85,6 +86,16 @@ namespace Cpl
             * \return Pointer to the description string.
             */
             virtual const char * What() const throw()
+            {
+                return _what;
+            }
+
+            /*!
+            * \fn const char * what() const
+            * \brief Overrides std::exception::what() so catching ParseError as std::exception keeps the diagnostic.
+            * \return Pointer to the description string.
+            */
+            virtual const char * what() const noexcept override
             {
                 return _what;
             }
@@ -503,7 +514,8 @@ namespace Cpl
                 if (_allocFunc)
                 {
                     memory = _allocFunc(size);
-                    assert(memory);
+                    if (!memory)
+                        throw std::bad_alloc();
                 }
                 else
                 {
@@ -693,6 +705,8 @@ namespace Cpl
             * \brief Constructs an attribute with an empty name and value and no siblings.
             */
             XmlAttribute()
+                : _prevAttribute(0)
+                , _nextAttribute(0)
             {
             }
 
@@ -1082,7 +1096,10 @@ namespace Cpl
                     child->_prevSibling->_nextSibling = 0;
                 }
                 else
+                {
                     _firstNode = 0;
+                    _lastNode = 0;
+                }
                 child->_parent = 0;
             }
 
@@ -1116,6 +1133,7 @@ namespace Cpl
                 for (XmlNode<Ch> *node = FirstNode(); node; node = node->_nextSibling)
                     node->_parent = 0;
                 _firstNode = 0;
+                _lastNode = 0;
             }
 
             /*!
@@ -1286,6 +1304,7 @@ namespace Cpl
             */
             XmlDocument()
                 : XmlNode<Ch>(NodeDocument)
+                , _parseDepth(0)
             {
             }
 
@@ -1306,8 +1325,9 @@ namespace Cpl
                 const Ch * startPos = text;
                 this->RemoveAllNodes();
                 this->RemoveAllAttributes();
+                _parseDepth = 0;
                 ParseBom<Flags>(text);
-                while (length - size_t(text - startPos) && *text != 0)
+                while (size_t(text - startPos) < length && *text != 0)
                 {
                     Skip<Whitespace, Flags>(text);
                     if (*text == Ch('<'))
@@ -1315,6 +1335,8 @@ namespace Cpl
                         ++text;
                         if (XmlNode<Ch> *node = ParseNode<Flags>(text))
                             this->AppendNode(node);
+                        if (size_t(text - startPos) > length)
+                            throw ParseError("data continues past the given length", text);
                     }
                     else if (*text != 0)
                         throw ParseError("expected <", text);
@@ -1333,6 +1355,25 @@ namespace Cpl
             }
 
         private:
+
+            // Bounds ParseElement recursion so a pathologically nested document fails cleanly instead of
+            // overflowing the stack.
+            static const size_t MAX_PARSE_DEPTH = 1000;
+            size_t _parseDepth;
+
+            struct DepthGuard
+            {
+                size_t & depth;
+                explicit DepthGuard(size_t & d) : depth(d) { ++depth; }
+                ~DepthGuard() { --depth; }
+            };
+
+            // The classification tables below cover the ASCII range only; a wider Ch (for example
+            // wchar_t) must not be truncated into that range before indexing.
+            static bool IsAsciiIndex(Ch ch)
+            {
+                return static_cast<unsigned long>(static_cast<typename std::make_unsigned<Ch>::type>(ch)) < 256;
+            }
 
             struct Whitespace
             {
@@ -1358,7 +1399,7 @@ namespace Cpl
                         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  // E
                         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1386,7 +1427,7 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  // E
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1414,7 +1455,7 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  // E
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1442,7 +1483,7 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  // E
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1470,7 +1511,7 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  // E
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1498,7 +1539,7 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  // E
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1547,9 +1588,9 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
                     if (Quote == Ch('\''))
-                        return data1[static_cast<unsigned char>(ch)];
+                        return IsAsciiIndex(ch) ? data1[static_cast<unsigned char>(ch)] : data1[255];
                     if (Quote == Ch('\"'))
-                        return data2[static_cast<unsigned char>(ch)];
+                        return IsAsciiIndex(ch) ? data2[static_cast<unsigned char>(ch)] : data2[255];
                     return 0;
                 }
             };
@@ -1599,9 +1640,9 @@ namespace Cpl
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1   // F
                     };
                     if (Quote == Ch('\''))
-                        return data1[static_cast<unsigned char>(ch)];
+                        return IsAsciiIndex(ch) ? data1[static_cast<unsigned char>(ch)] : data1[255];
                     if (Quote == Ch('\"'))
-                        return data2[static_cast<unsigned char>(ch)];
+                        return IsAsciiIndex(ch) ? data2[static_cast<unsigned char>(ch)] : data2[255];
                     return 0;
                 }
             };
@@ -1630,7 +1671,7 @@ namespace Cpl
                         255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,  // E
                         255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255   // F
                     };
-                    return data[static_cast<unsigned char>(ch)];
+                    return IsAsciiIndex(ch) ? data[static_cast<unsigned char>(ch)] : data[255];
                 }
             };
 
@@ -1758,6 +1799,8 @@ namespace Cpl
                                         if (digit == 0xFF)
                                             break;
                                         code = code * 16 + digit;
+                                        if (code >= 0x110000)
+                                            throw ParseError("invalid numeric character entity", src);
                                         ++src;
                                     }
                                     InsertCodedCharacter<Flags>(dest, code);
@@ -1766,12 +1809,12 @@ namespace Cpl
                                 {
                                     unsigned long code = 0;
                                     src += 2;
-                                    while (1)
+                                    while (*src >= Ch('0') && *src <= Ch('9'))
                                     {
-                                        unsigned char digit = Digits::Digit(*src);
-                                        if (digit == 0xFF)
-                                            break;
+                                        unsigned char digit = static_cast<unsigned char>(*src - Ch('0'));
                                         code = code * 10 + digit;
+                                        if (code >= 0x110000)
+                                            throw ParseError("invalid numeric character entity", src);
                                         ++src;
                                     }
                                     InsertCodedCharacter<Flags>(dest, code);
@@ -1971,12 +2014,12 @@ namespace Cpl
                 {
                     if (Flags & ParseNormalizeWhitespace)
                     {
-                        if (*(end - 1) == Ch(' '))
+                        if (end > value && *(end - 1) == Ch(' '))
                             --end;
                     }
                     else
                     {
-                        while (Whitespace::Test(*(end - 1)))
+                        while (end > value && Whitespace::Test(*(end - 1)))
                             --end;
                     }
                 }
@@ -2032,6 +2075,9 @@ namespace Cpl
 
             template<int Flags> XmlNode<Ch> * ParseElement(Ch *&text)
             {
+                DepthGuard depthGuard(_parseDepth);
+                if (_parseDepth > MAX_PARSE_DEPTH)
+                    throw ParseError("maximum element nesting depth exceeded", text);
                 XmlNode<Ch> *element = this->AllocateNode(NodeElement);
                 Ch *name = text;
                 Skip<NodeName, Flags>(text);
@@ -2093,6 +2139,7 @@ namespace Cpl
                         if (text[2] == Ch('C') && text[3] == Ch('D') && text[4] == Ch('A') &&
                             text[5] == Ch('T') && text[6] == Ch('A') && text[7] == Ch('['))
                         {
+                            text += 8;
                             return ParseCData<Flags>(text);
                         }
                         break;
@@ -2248,6 +2295,7 @@ namespace Cpl
             */
             NodeIterator()
                 : _node(0)
+                , _parent(0)
             {
             }
 
@@ -2258,6 +2306,7 @@ namespace Cpl
             */
             NodeIterator(XmlNode<Ch> *node)
                 : _node(node->FirstNode())
+                , _parent(node)
             {
             }
 
@@ -2314,8 +2363,16 @@ namespace Cpl
             */
             NodeIterator& operator--()
             {
-                assert(_node && _node->PreviousSibling());
-                _node = _node->PreviousSibling();
+                if (_node)
+                {
+                    assert(_node->PreviousSibling());
+                    _node = _node->PreviousSibling();
+                }
+                else
+                {
+                    assert(_parent && _parent->LastNode());
+                    _node = _parent->LastNode();
+                }
                 return *this;
             }
 
@@ -2356,6 +2413,7 @@ namespace Cpl
         private:
 
             XmlNode<Ch> *_node;
+            XmlNode<Ch> *_parent;
 
         };
 
@@ -2403,6 +2461,7 @@ namespace Cpl
             */
             AttributeIterator()
                 : _attribute(0)
+                , _parent(0)
             {
             }
 
@@ -2413,6 +2472,7 @@ namespace Cpl
             */
             AttributeIterator(XmlNode<Ch> *node)
                 : _attribute(node->FirstAttribute())
+                , _parent(node)
             {
             }
 
@@ -2469,8 +2529,16 @@ namespace Cpl
             */
             AttributeIterator& operator--()
             {
-                assert(_attribute && _attribute->PreviousAttribute());
-                _attribute = _attribute->PreviousAttribute();
+                if (_attribute)
+                {
+                    assert(_attribute->PreviousAttribute());
+                    _attribute = _attribute->PreviousAttribute();
+                }
+                else
+                {
+                    assert(_parent && _parent->LastAttribute());
+                    _attribute = _parent->LastAttribute();
+                }
                 return *this;
             }
 
@@ -2511,6 +2579,7 @@ namespace Cpl
         private:
 
             XmlAttribute<Ch> *_attribute;
+            XmlNode<Ch> *_parent;
 
         };
 
@@ -2881,16 +2950,13 @@ namespace Cpl
             */
             File(std::basic_istream<Ch> & is)
             {
-                decltype(_data) tdata;
                 is.unsetf(std::ios::skipws);
-                is.seekg(0, std::ios::end);
-                size_t size = is.tellg();
-                tdata.resize(size + 1);
                 is.seekg(0, std::ios::beg);
-                std::copy(std::istreambuf_iterator<Ch>(is), std::istreambuf_iterator<Ch>(), std::begin(tdata));
-                if (is.fail() || is.bad())
+                std::istreambuf_iterator<Ch> begin(is), end;
+                decltype(_data) tdata(begin, end);
+                if (is.bad())
                     throw std::runtime_error("error reading stream");
-                tdata[size] = 0;
+                tdata.push_back(0);
                 _data = std::move(tdata);
             }
 
@@ -2906,13 +2972,20 @@ namespace Cpl
                 if (!ifs)
                     return false;
                 ifs.unsetf(std::ios::skipws);
-                ifs.seekg(0, std::ios::end);
-                size_t size = ifs.tellg();
-                ifs.seekg(0);
-                _data.resize(size + 1);
-                ifs.read(_data.data(), (std::streamsize)size);
-                _data[size] = 0;
-                return true;
+                try
+                {
+                    std::istreambuf_iterator<Ch> begin(ifs), end;
+                    decltype(_data) tdata(begin, end);
+                    if (ifs.bad())
+                        return false;
+                    tdata.push_back(0);
+                    _data = std::move(tdata);
+                    return true;
+                }
+                catch (const std::exception&)
+                {
+                    return false;
+                }
             }
 
             /*!

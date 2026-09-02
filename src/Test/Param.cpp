@@ -693,9 +693,9 @@ namespace Test
         return RunIsolated([]() -> bool
         {
             Cpl::String value = Cpl::ToStr(FooB);
-            if (value != "FooB")
+            if (value != "B")
             {
-                CPL_LOG_SS(Error, "ToStr(FooB) expected 'FooB', got '" << value << "'");
+                CPL_LOG_SS(Error, "ToStr(FooB) expected 'B', got '" << value << "'");
                 return false;
             }
             return true;

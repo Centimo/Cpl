@@ -26,6 +26,8 @@
 
 #include "Cpl/String.h"
 
+#include <map>
+
 namespace Cpl
 {
     /*! @ingroup cpl_yaml
@@ -738,7 +740,8 @@ namespace Cpl
 
             CPL_INLINE Node& EmptyNode()
             {
-                static Node empty = Node(true);
+                // Thread-local: the node is cleared on every out-of-range access (see Node::operator[]).
+                static thread_local Node empty = Node(true);
                 return empty;
             }
 
@@ -807,47 +810,27 @@ namespace Cpl
 
                 virtual Node* Insert(const size_t index)
                 {
-                    if (m_Sequence.size() == 0)
-                    {
-                        Node* pNode = new Node;
-                        m_Sequence.insert({ 0, pNode });
-                        return pNode;
-                    }
+                    const size_t clampedIndex = std::min(index, m_Sequence.size());
 
-                    if (index >= m_Sequence.size())
-                    {
-                        auto it = m_Sequence.end();
-                        --it;
-                        Node* pNode = new Node;
-                        m_Sequence.insert({ it->first, pNode });
-                        return pNode;
-                    }
-
-                    auto it = m_Sequence.cbegin();
-                    while (it != m_Sequence.cend())
-                    {
-                        m_Sequence[it->first + 1] = it->second;
-
-                        if (it->first == index)
-                        {
-                            break;
-                        }
-                    }
+                    std::map<size_t, Node*> shifted;
+                    for (auto it = m_Sequence.begin(); it != m_Sequence.end(); ++it)
+                        shifted.insert({ it->first >= clampedIndex ? it->first + 1 : it->first, it->second });
 
                     Node* pNode = new Node;
-                    m_Sequence.insert({ index, pNode });
+                    shifted.insert({ clampedIndex, pNode });
+                    m_Sequence = std::move(shifted);
                     return pNode;
                 }
 
                 virtual Node* PushFront()
                 {
-                    for (auto it = m_Sequence.cbegin(); it != m_Sequence.cend(); it++)
-                    {
-                        m_Sequence[it->first + 1] = it->second;
-                    }
+                    std::map<size_t, Node*> shifted;
+                    for (auto it = m_Sequence.begin(); it != m_Sequence.end(); ++it)
+                        shifted.insert({ it->first + 1, it->second });
 
                     Node* pNode = new Node;
-                    m_Sequence.insert({ 0, pNode });
+                    shifted.insert({ 0, pNode });
+                    m_Sequence = std::move(shifted);
                     return pNode;
                 }
 
@@ -874,7 +857,12 @@ namespace Cpl
                         return;
                     }
                     delete it->second;
-                    m_Sequence.erase(index);
+                    m_Sequence.erase(it);
+
+                    std::map<size_t, Node*> shifted;
+                    for (auto entry = m_Sequence.begin(); entry != m_Sequence.end(); ++entry)
+                        shifted.insert({ entry->first > index ? entry->first - 1 : entry->first, entry->second });
+                    m_Sequence = std::move(shifted);
                 }
 
                 virtual void Erase(const std::string& key)
@@ -1385,7 +1373,7 @@ namespace Cpl
             switch (m_Type)
             {
             case SequenceType:
-                return { String(), *(static_cast<Detail::SequenceIteratorImp*>(m_pImp)->m_Iterator->second) };
+                return { Detail::EmptyString(), *(static_cast<Detail::SequenceIteratorImp*>(m_pImp)->m_Iterator->second) };
                 break;
             case MapType:
                 return { static_cast<Detail::MapIteratorImp*>(m_pImp)->m_Iterator->first,
@@ -1449,7 +1437,9 @@ namespace Cpl
                 break;
             }
 
-            return false;
+            // Both iterators are of the None type (scalar or empty node): there is nothing to
+            // position over, so they are always at the same (only) place.
+            return true;
         }
 
         inline bool Iterator::operator != (const Iterator& it)
@@ -1537,7 +1527,7 @@ namespace Cpl
             switch (m_Type)
             {
             case SequenceType:
-                return { String(), *(static_cast<Detail::SequenceConstIteratorImp*>(m_pImp)->m_Iterator->second) };
+                return { Detail::EmptyString(), *(static_cast<Detail::SequenceConstIteratorImp*>(m_pImp)->m_Iterator->second) };
                 break;
             case MapType:
                 return { static_cast<Detail::MapConstIteratorImp*>(m_pImp)->m_Iterator->first,
@@ -1601,7 +1591,9 @@ namespace Cpl
                 break;
             }
 
-            return false;
+            // Both iterators are of the None type (scalar or empty node): there is nothing to
+            // position over, so they are always at the same (only) place.
+            return true;
         }
 
         inline bool ConstIterator::operator != (const ConstIterator& it)
@@ -1701,7 +1693,13 @@ namespace Cpl
             ((Detail::NodeImp*)m_pImp)->InitSequence();
             Node* pNode = ((Detail::NodeImp*)m_pImp)->m_pImp->GetNode(index);
             if (pNode == nullptr)
-                return Detail::EmptyNode();
+            {
+                // Reset on every out-of-range access so a write through one access (a[5] = "x")
+                // cannot be observed through an unrelated out-of-range access (b[7]).
+                Node& empty = Detail::EmptyNode();
+                empty.Clear();
+                return empty;
+            }
             return *pNode;
         }
 
@@ -1727,8 +1725,12 @@ namespace Cpl
 
         inline Node& Node::operator = (const Node& node)
         {
+            // node may be a child owned by *this (for example root = root["child"]); copy it out
+            // to an independent node before clearing *this, so Clear() cannot free what node refers to.
+            Node tmp;
+            CopyNode(node, tmp);
             ((Detail::NodeImp*)m_pImp)->Clear();
-            CopyNode(node, *this);
+            CopyNode(tmp, *this);
             return *this;
         }
 
@@ -2125,7 +2127,9 @@ namespace Cpl
                 it = m_Lines.insert(it, new ReaderLine(newLine, pLine->No, pLine->Offset + valueStart));
                 pLine->Data = "";
 
-                return false;
+                // The split-off line may itself start a nested sequence ("- - a"); let the caller
+                // run it through PostProcessSequenceLine again instead of treating it as a scalar.
+                return true;
             }
 
             bool PostProcessMappingLine(std::list<ReaderLine*>::iterator& it)
@@ -2453,6 +2457,12 @@ namespace Cpl
                     {
                         throw ParsingException(ExceptionMessage(Detail::ErrorInvalidQuote(), *pFirstLine));
                     }
+
+                    if (data.size() && (data[0] == '"' || data[0] == '\''))
+                    {
+                        data = data.substr(1, data.size() - 2);
+                        RemoveAllEscapeTokens(data);
+                    }
                 }
                 // Block scalar
                 else
@@ -2529,11 +2539,6 @@ namespace Cpl
                             data += "\n";
                         }
                     }
-                }
-
-                if (data.size() && (data[0] == '"' || data[0] == '\''))
-                {
-                    data = data.substr(1, data.size() - 2);
                 }
 
                 node = data;
@@ -2736,15 +2741,25 @@ namespace Cpl
                 throw OperationException(Detail::ErrorCannotOpenFile());
             }
 
-            f.seekg(0, f.end);
-            size_t fileSize = static_cast<size_t>(f.tellg());
-            f.seekg(0, f.beg);
-
-            std::unique_ptr<char[]> data(new char[fileSize]);
-            f.read(data.get(), fileSize);
+            // Read incrementally instead of pre-sizing the buffer from tellg(): opening a directory
+            // succeeds on Linux, but its reported size is not a usable byte count.
+            std::vector<char> data;
+            try
+            {
+                std::istreambuf_iterator<char> begin(f), end;
+                data.assign(begin, end);
+            }
+            catch (const std::exception&)
+            {
+                throw OperationException(Detail::ErrorCannotOpenFile());
+            }
+            if (f.bad())
+            {
+                throw OperationException(Detail::ErrorCannotOpenFile());
+            }
             f.close();
 
-            Parse(root, data.get(), fileSize);
+            Parse(root, data.data(), data.size());
         }
 
         /*! @ingroup cpl_yaml
@@ -2990,7 +3005,9 @@ namespace Cpl
 
                         if (ShouldBeCited(value))
                         {
-                            stream << "\"" << value << "\"\n";
+                            std::string escaped = value;
+                            AddEscapeTokens(escaped, "\\\"");
+                            stream << "\"" << escaped << "\"\n";
                             break;
                         }
                         stream << value << "\n";
@@ -3009,9 +3026,12 @@ namespace Cpl
                 stream << "\n";
 
 
+                // A nested scalar is already called with the level below its key; a root-level
+                // block scalar (level 0) still needs its body indented deeper than the header.
+                const std::string bodyIndent(level > 0 ? level : config.SpaceIndentation, ' ');
                 for (auto it = lines.begin(); it != lines.end(); it++)
                 {
-                    stream << std::string(level, ' ') << (*it) << "\n";
+                    stream << bodyIndent << (*it) << "\n";
                 }
             }
             break;
@@ -3166,34 +3186,23 @@ namespace Cpl
         {
             if (input.size() == 0)
                 return true;
-            char token = 0;
-            size_t searchPos = 0;
-            if (input[0] == '\"' || input[0] == '\'')
+            // A plain (unquoted) scalar may contain quote characters anywhere; only a scalar that
+            // itself starts with a quote needs its closing quote validated.
+            if (input[0] != '\"' && input[0] != '\'')
+                return true;
+            // The first unescaped closing quote must be the last character.
+            const char token = input[0];
+            size_t searchPos = 1;
+            while (searchPos < input.size())
             {
-                if (input.size() == 1)
-                    return false;
-                token = input[0];
-                searchPos = 1;
-            }
-            while (searchPos != std::string::npos && searchPos < input.size() - 1)
-            {
-                searchPos = input.find_first_of("\"'", searchPos + 1);
+                searchPos = input.find(token, searchPos);
                 if (searchPos == std::string::npos)
-                    break;
-                const char foundToken = input[searchPos];
-                if (input[searchPos] == '\"' || input[searchPos] == '\'')
-                {
-                    if (token == 0 && input[searchPos - 1] != '\\')
-                        return false;
-                    if (foundToken == token && input[searchPos - 1] != '\\')
-                    {
-                        if (searchPos == input.size() - 1)
-                            return true;
-                        return false;
-                    }
-                }
+                    return false;
+                if (input[searchPos - 1] != '\\')
+                    return searchPos == input.size() - 1;
+                ++searchPos;
             }
-            return token == 0;
+            return false;
         }
 
         inline void CopyNode(const Node& from, Node& to)

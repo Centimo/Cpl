@@ -28,7 +28,8 @@
 #include "Cpl/Defs.h"
 #include "Cpl/Utils.h"
 
-#include <math.h>
+#include <cmath>
+#include <type_traits>
 
 namespace Cpl
 {
@@ -52,7 +53,7 @@ namespace Cpl
     */
     template <> CPL_INLINE ptrdiff_t Convert<ptrdiff_t, double>(double src)
     {
-        return Round(src);
+        return static_cast<ptrdiff_t>(std::llround(src));
     }
 
     /*! @ingroup cpl_geometry
@@ -62,7 +63,7 @@ namespace Cpl
     */
     template <> CPL_INLINE ptrdiff_t Convert<ptrdiff_t, float>(float src)
     {
-        return Round(src);
+        return static_cast<ptrdiff_t>(std::llround(src));
     }
 
     //---------------------------------------------------------------------------------------------
@@ -505,10 +506,10 @@ namespace Cpl
         * \param [in] r - Source rectangle.
         */
         template <class TR, template<class> class TRectangle> CPL_INLINE Rectangle(const TRectangle<TR>& r)
-            : x(r.x)
-            , y(r.y)
-            , w(r.w)
-            , h(r.h)
+            : x(Convert<T, TR>(r.x))
+            , y(Convert<T, TR>(r.y))
+            , w(Convert<T, TR>(r.w))
+            , h(Convert<T, TR>(r.h))
         {
         }
 
@@ -671,7 +672,7 @@ namespace Cpl
             T l = std::max(x, _r.x);
             T t = std::max(y, _r.y);
             T r = std::max(l, std::min(Right(), _r.Right()));
-            T b = std::max(b, std::min(Bottom(), _r.Bottom()));
+            T b = std::max(t, std::min(Bottom(), _r.Bottom()));
             return Rectangle(l, t, r - l, b - t);
         }
 
@@ -688,7 +689,7 @@ namespace Cpl
             bool rl = Right() > r.x;
             bool tb = y < r.Bottom();
             bool bt = Bottom() > r.y;
-            return (lr == rl) && (tb == bt);
+            return lr && rl && tb && bt;
         }
 
         /*!
@@ -764,37 +765,38 @@ namespace Cpl
     template <class T, template<class> class TPoint>
     CPL_INLINE int CrossScore(const TPoint<T> & a1, const TPoint<T> & a2, const TPoint<T> & b1, const TPoint<T> & b2)
     {
-        T Aa = a1.y - a2.y; 
-        T Ba = a2.x - a1.x; 
-        T Ca = a1.x*a2.y - a2.x*a1.y;
+        typedef typename std::conditional<std::is_integral<T>::value, long long, T>::type C;
 
-        T Ab = b1.y - b2.y; 
-        T Bb = b2.x - b1.x; 
-        T Cb = b1.x*b2.y - b2.x*b1.y;
+        const C a1x = static_cast<C>(a1.x), a1y = static_cast<C>(a1.y);
+        const C a2x = static_cast<C>(a2.x), a2y = static_cast<C>(a2.y);
+        const C b1x = static_cast<C>(b1.x), b1y = static_cast<C>(b1.y);
+        const C b2x = static_cast<C>(b2.x), b2y = static_cast<C>(b2.y);
 
-        T D = Aa*Bb - Ab*Ba;
+        C Aa = a1y - a2y;
+        C Ba = a2x - a1x;
+        C Ca = a1x*a2y - a2x*a1y;
+
+        C Ab = b1y - b2y;
+        C Bb = b2x - b1x;
+        C Cb = b1x*b2y - b2x*b1y;
+
+        C D = Aa*Bb - Ab*Ba;
 
         if(D == 0)
             return 0;
 
-        T x = Ba*Cb - Bb*Ca;
-        T y = Ab*Ca - Aa*Cb;
+        C x = Ba*Cb - Bb*Ca;
+        C y = Ab*Ca - Aa*Cb;
 
-        T a1x = a1.x*D;
-        T a1y = a1.y*D;
-        T a2x = a2.x*D;
-        T a2y = a2.y*D;
-        T b1x = b1.x*D;
-        T b1y = b1.y*D;
-        T b2x = b2.x*D;
-        T b2y = b2.y*D;
+        const C a1xD = a1x*D, a1yD = a1y*D, a2xD = a2x*D, a2yD = a2y*D;
+        const C b1xD = b1x*D, b1yD = b1y*D, b2xD = b2x*D, b2yD = b2y*D;
 
-        if((x < a1x && x < a2x) || (x > a2x && x > a1x) || (y < a1y && y < a2y) || (y > a2y && y > a1y) ||
-           (x < b1x && x < b2x) || (x > b2x && x > b1x) || (y < b1y && y < b2y) || (y > b2y && y > b1y))
+        if((x < a1xD && x < a2xD) || (x > a2xD && x > a1xD) || (y < a1yD && y < a2yD) || (y > a2yD && y > a1yD) ||
+           (x < b1xD && x < b2xD) || (x > b2xD && x > b1xD) || (y < b1yD && y < b2yD) || (y > b2yD && y > b1yD))
             return 0;
 
-        return ((x == b1x && y == b1y) || (x == b2x && y == b2y) || 
-                (x == a1x && y == a1y) || (x == a2x && y == a2y) ? 1 : 2)*
+        return ((x == b1xD && y == b1yD) || (x == b2xD && y == b2yD) ||
+                (x == a1xD && y == a1yD) || (x == a2xD && y == a2yD) ? 1 : 2)*
                 (Ba*Ab - Bb*Aa < 0 ? 1 : -1);
     }
 
@@ -824,6 +826,8 @@ namespace Cpl
     template <class T, template<class> class TPoint> CPL_INLINE Point<T> OutsidePoint(const std::vector<Point<T> >& polygon)
     {
         size_t size = polygon.size();
+        if (size == 0)
+            return Point<T>();
         Point<T> outside = polygon[0];
         for (size_t i = 1; i < size; ++i)
             outside = Max<T>(outside, polygon[i]);
@@ -841,6 +845,8 @@ namespace Cpl
     template <class T, template<class> class TPoint> CPL_INLINE Rectangle<T> BoundingBox(const std::vector<TPoint<T> >& polygon)
     {
         size_t size = polygon.size();
+        if (size == 0)
+            return Rectangle<T>();
         Point<T> min = polygon[0], max = polygon[0];
         for (size_t i = 1; i < size; ++i)
             min = Min<T>(min, polygon[i]), max = Max<T>(max, polygon[i]);
@@ -861,6 +867,8 @@ namespace Cpl
     template <class T, template<class> class TPoint>
     CPL_INLINE bool PolygonHasPoint(const std::vector<TPoint<T> >& polygon, const TPoint<T> & point, TPoint<T> outside = TPoint<T>())
     {
+        if (polygon.empty())
+            return false;
         if (outside == Point<T>())
             outside = OutsidePoint<T, TPoint>(polygon);
         size_t size = polygon.size();
@@ -887,6 +895,8 @@ namespace Cpl
     template <class T, template<class> class TPoint>
     CPL_INLINE bool PolygonOverlapsRectangle(const std::vector<TPoint<T> >& polygon, const Rectangle<T>& rect)
     {
+        if (polygon.empty())
+            return false;
         Rectangle<T> bbox = BoundingBox(polygon);
         Point<T> outside = Point<T>(bbox.x - 1, bbox.y - 1);
         if (!bbox.Overlaps(rect))

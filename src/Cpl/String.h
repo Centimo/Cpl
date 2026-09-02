@@ -87,11 +87,13 @@ namespace Cpl
     /*! @ingroup cpl_string
     * \brief Converts a size_t value to a string.
     * \param [in] value - Value to convert.
-    * \return Decimal representation of value, formatted through ptrdiff_t.
+    * \return Decimal representation of value.
     */
     template<> CPL_INLINE String ToStr<size_t>(const size_t& value)
     {
-        return ToStr((ptrdiff_t)value);
+        std::stringstream ss;
+        ss << value;
+        return ss.str();
     }
 
     /*! @ingroup cpl_string
@@ -104,7 +106,7 @@ namespace Cpl
         std::stringstream ss;
         int digits = std::numeric_limits<float>::digits10 + 1, extra = 0;
         float abs = std::abs(value);
-        if (abs < 1.0f)
+        if (abs > 0.0f && abs < 1.0f)
             extra = -(int)std::floor(std::log10(abs));
         if (extra < 5)
             ss << std::fixed;
@@ -123,7 +125,7 @@ namespace Cpl
         std::stringstream ss;
         int digits = std::numeric_limits<double>::digits10 + 1, extra = 0;
         double abs = std::abs(value);
-        if (abs < 1.0)
+        if (abs > 0.0 && abs < 1.0)
             extra = -(int)std::floor(std::log10(abs));
         if (extra < 8)
             ss << std::fixed;
@@ -197,18 +199,18 @@ namespace Cpl
     }
 
     /*! @ingroup cpl_string
-    * \brief Assigns a string to value unless the input is empty.
-    * \param [in] string - Input string. A single space is copied, unlike the generic ToVal overload.
-    * \param [in,out] value - Destination updated when string is not empty.
+    * \brief Assigns a string to value.
+    * \param [in] string - Input string, copied as-is (including an empty string), unlike the
+    *                      generic ToVal overload which leaves value unchanged for empty input.
+    * \param [in,out] value - Destination updated with string.
     */
     template<> CPL_INLINE void ToVal<String>(const String& string, String& value)
     {
-        if (string != "")
-            value = string;
+        value = string;
     }
 
     /*! @ingroup cpl_string
-    * \brief Parses a string into a size_t value through ptrdiff_t.
+    * \brief Parses a string into a size_t value.
     * \param [in] string - Input string. Empty or a single space leaves value unchanged.
     * \param [in,out] value - Destination updated on success.
     */
@@ -216,9 +218,8 @@ namespace Cpl
     {
         if (string != "" && string != " ")
         {
-            ptrdiff_t tmp;
-            ToVal(string, tmp);
-            value = static_cast<size_t>(tmp);
+            std::stringstream ss(string);
+            ss >> value;
         }
     }
 
@@ -679,7 +680,7 @@ namespace Cpl
             if (atPos != uri.size() - 1)
                 path = uri.substr(atPos + 1);
             auto dotsPos = uri.find(':', prefixSize);
-            if (dotsPos != std::string::npos)
+            if (dotsPos != std::string::npos && dotsPos < atPos)
             {
                 login = uri.substr(prefixSize, dotsPos - prefixSize);
                 password = uri.substr(dotsPos + 1, atPos - dotsPos - 1);
