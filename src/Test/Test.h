@@ -31,12 +31,22 @@
 #include "Cpl/Log.h"
 #include "Cpl/Performance.h"
 
+#include <functional>
+
 namespace Test
 {
     typedef Cpl::Log Log;
     typedef Cpl::Int Int;
     typedef Cpl::String String;
     typedef Cpl::Strings Strings;
+
+    /*!
+    * Runs body in a child process (fork on POSIX) so that a crash, a sanitizer abort or an endless loop
+    * inside body is reported as a test failure instead of taking the whole test application down.
+    * Returns false when body returns false, terminates abnormally or does not finish within timeoutMs.
+    * On platforms without fork the body is called directly.
+    */
+    bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs = 3000);
 }
 
 #include "Test/TestOptions.h"

@@ -30,8 +30,87 @@
 
 #include "Test/Test.h"
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <unistd.h>
+#include <chrono>
+#include <thread>
+#endif
+
 namespace Test
 {
+#if defined(__unix__) || defined(__APPLE__)
+    bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs)
+    {
+        std::cout << std::flush;
+        std::cerr << std::flush;
+        const pid_t pid = fork();
+        if (pid < 0)
+        {
+            CPL_LOG_SS(Error, "RunIsolated: fork() failed.");
+            return false;
+        }
+        if (pid == 0)
+        {
+            bool result = false;
+            try
+            {
+                result = body();
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "RunIsolated: uncaught exception: " << e.what() << std::endl;
+            }
+            catch (...)
+            {
+                std::cerr << "RunIsolated: uncaught non-standard exception." << std::endl;
+            }
+            std::cout << std::flush;
+            std::cerr << std::flush;
+            _exit(result ? 0 : 1);
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        int status = 0;
+        for (;;)
+        {
+            const pid_t waited = waitpid(pid, &status, WNOHANG);
+            if (waited == pid)
+                break;
+            if (waited < 0)
+            {
+                CPL_LOG_SS(Error, "RunIsolated: waitpid() failed.");
+                return false;
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                CPL_LOG_SS(Error, "RunIsolated: body did not finish in " << timeoutMs << " ms, killed.");
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (WIFSIGNALED(status))
+        {
+            CPL_LOG_SS(Error, "RunIsolated: body terminated by signal " << WTERMSIG(status) << ".");
+            return false;
+        }
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        {
+            CPL_LOG_SS(Error, "RunIsolated: body failed with exit code " << (WIFEXITED(status) ? WEXITSTATUS(status) : -1) << ".");
+            return false;
+        }
+        return true;
+    }
+#else
+    bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs)
+    {
+        return body();
+    }
+#endif
+
     typedef bool(*TestPtr)(const Options& options);
 
     struct Group
