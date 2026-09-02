@@ -2770,19 +2770,8 @@ namespace Cpl
         */
         inline void Parse(Node& root, std::istream& stream)
         {
-            ParseImp* pImp = nullptr;
-
-            try
-            {
-                pImp = new ParseImp;
-                pImp->Parse(root, stream);
-                delete pImp;
-            }
-            catch (const Exception e)
-            {
-                delete pImp;
-                throw;
-            }
+            ParseImp imp;
+            imp.Parse(root, stream);
         }
 
         /*! @ingroup cpl_yaml

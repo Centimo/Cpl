@@ -48,6 +48,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <cerrno>
 #endif
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
@@ -757,6 +758,95 @@ namespace Cpl
     * \param [in] dst - Destination path.
     * \return true if src and dst are the same or the copy succeeded, false otherwise.
     */
+#if defined(__linux__) && !defined(CPL_FILE_USE_FILESYSTEM)
+    namespace PosixDetail
+    {
+        struct Directory
+        {
+            DIR* handle;
+
+            explicit Directory(const String& path)
+                : handle(opendir(path.c_str()))
+            {
+            }
+
+            ~Directory()
+            {
+                if (handle)
+                    closedir(handle);
+            }
+
+            Directory(const Directory&) = delete;
+            Directory& operator = (const Directory&) = delete;
+        };
+
+        CPL_INLINE bool ReadEntries(const String& path, Strings& names)
+        {
+            Directory directory(path);
+            if (!directory.handle)
+                return false;
+            for (struct dirent* entry = readdir(directory.handle); entry; entry = readdir(directory.handle))
+            {
+                const String name = entry->d_name;
+                if (name != "." && name != "..")
+                    names.push_back(name);
+            }
+            return true;
+        }
+
+        CPL_INLINE bool CopyFileContent(const String& src, const String& dst)
+        {
+            std::ifstream in(src.c_str(), std::ios::binary);
+            std::ofstream out(dst.c_str(), std::ios::binary | std::ios::trunc);
+            if (!in.is_open() || !out.is_open())
+                return false;
+            std::copy(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>(), std::ostreambuf_iterator<char>(out));
+            out.flush();
+            return !in.bad() && !out.fail();
+        }
+
+        // Recursive, so it cannot be always_inline.
+        inline bool CopyRecursive(const String& src, const String& dst)
+        {
+            struct stat status;
+            if (stat(src.c_str(), &status) != 0)
+                return false;
+            if (!S_ISDIR(status.st_mode))
+                return CopyFileContent(src, dst);
+            if (mkdir(dst.c_str(), status.st_mode & 0777) != 0 && errno != EEXIST)
+                return false;
+            Strings names;
+            if (!ReadEntries(src, names))
+                return false;
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                if (!CopyRecursive(src + "/" + names[i], dst + "/" + names[i]))
+                    return false;
+            }
+            return true;
+        }
+
+        // Recursive, so it cannot be always_inline.
+        inline bool RemoveRecursive(const String& path)
+        {
+            struct stat status;
+            if (lstat(path.c_str(), &status) != 0)
+                return false;
+            if (!S_ISDIR(status.st_mode))
+                return unlink(path.c_str()) == 0;
+            Strings names;
+            if (!ReadEntries(path, names))
+                return false;
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                if (!RemoveRecursive(path + "/" + names[i]))
+                    return false;
+            }
+            return rmdir(path.c_str()) == 0;
+        }
+    }
+#endif
+
     CPL_INLINE bool Copy(const String& src, const String& dst)
     {
         if (src == dst)
@@ -794,8 +884,7 @@ namespace Cpl
         }
         return false;
 #elif __linux__
-        String com = String("cp -R ") + src + " " + dst;
-        return std::system(com.c_str()) == 0;
+        return PosixDetail::CopyRecursive(src, dst);
 #else
 #error Not supported system
 #endif
@@ -858,8 +947,7 @@ namespace Cpl
         return SHFileOperationA( &operation ) == 0;
 
 #elif __linux__
-        String com = String("rm -rf ") + dir;
-        return std::system(com.c_str()) == 0;
+        return PosixDetail::RemoveRecursive(dir);
 #else
 #error Not supported system
 #endif
@@ -883,9 +971,20 @@ namespace Cpl
             retval = std::string(buf);
         }
 #elif __linux__
-        char buf[512];
-        size_t len = readlink("/proc/self/exe", buf, sizeof(buf));
-        std::string retval(buf, len);
+        std::string retval;
+        std::vector<char> buf(256);
+        for (;;)
+        {
+            const ssize_t len = readlink("/proc/self/exe", buf.data(), buf.size());
+            if (len < 0)
+                return String();
+            if (static_cast<size_t>(len) < buf.size())
+            {
+                retval.assign(buf.data(), static_cast<size_t>(len));
+                break;
+            }
+            buf.resize(buf.size() * 2);
+        }
 #else
 #error Not supported system
 #endif
