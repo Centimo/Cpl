@@ -49,4 +49,4 @@ namespace Test
     bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs = 3000);
 }
 
-#include "Test/TestOptions.h"
+#include "Test/Options.h"

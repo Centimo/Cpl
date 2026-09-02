@@ -5,7 +5,7 @@ set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 include_directories(${ROOT_DIR}/src)
 
-file(GLOB_RECURSE TEST_SRC ${ROOT_DIR}/src/Test/Test*.cpp)
+file(GLOB_RECURSE TEST_SRC ${ROOT_DIR}/src/Test/*.cpp)
 add_executable(Test ${TEST_SRC})
 
 option(CPL_SANITIZE "Build the tests with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)

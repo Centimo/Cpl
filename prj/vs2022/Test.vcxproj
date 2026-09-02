@@ -22,18 +22,20 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\Test\Test.cpp" />
-	<ClCompile Include="..\..\src\Test\TestArgsParser.cpp" />
-    <ClCompile Include="..\..\src\Test\TestFile.cpp" />
-    <ClCompile Include="..\..\src\Test\TestGeometryUtils.cpp" />
-    <ClCompile Include="..\..\src\Test\TestLog.cpp" />
-    <ClCompile Include="..\..\src\Test\TestParam.cpp" />
-    <ClCompile Include="..\..\src\Test\TestParamV2.cpp" />
-    <ClCompile Include="..\..\src\Test\TestPerformance.cpp" />
-    <ClCompile Include="..\..\src\Test\TestProp.cpp" />
-    <ClCompile Include="..\..\src\Test\TestString.cpp" />
-    <ClCompile Include="..\..\src\Test\TestTable.cpp" />
-    <ClCompile Include="..\..\src\Test\TestXml.cpp" />
-    <ClCompile Include="..\..\src\Test\TestYaml.cpp" />
+	<ClCompile Include="..\..\src\Test\ArgsParser.cpp" />
+    <ClCompile Include="..\..\src\Test\File.cpp" />
+    <ClCompile Include="..\..\src\Test\GeometryUtils.cpp" />
+    <ClCompile Include="..\..\src\Test\Log.cpp" />
+    <ClCompile Include="..\..\src\Test\Param.cpp" />
+    <ClCompile Include="..\..\src\Test\ParamV2.cpp" />
+    <ClCompile Include="..\..\src\Test\Performance.cpp" />
+    <ClCompile Include="..\..\src\Test\Prop.cpp" />
+    <ClCompile Include="..\..\src\Test\String.cpp" />
+    <ClCompile Include="..\..\src\Test\Table.cpp" />
+    <ClCompile Include="..\..\src\Test\Xml.cpp" />
+    <ClCompile Include="..\..\src\Test\Yaml.cpp" />
+    <ClCompile Include="..\..\src\Test\Html.cpp" />
+    <ClCompile Include="..\..\src\Test\Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\Cpl\Args.h" />
@@ -55,7 +57,7 @@
     <ClInclude Include="..\..\src\Cpl\Xml.h" />
     <ClInclude Include="..\..\src\Cpl\Yaml.h" />
     <ClInclude Include="..\..\src\Test\Test.h" />
-    <ClInclude Include="..\..\src\Test\TestOptions.h" />
+    <ClInclude Include="..\..\src\Test\Options.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
