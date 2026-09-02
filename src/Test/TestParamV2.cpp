@@ -94,4 +94,33 @@ namespace Test
 
         return loaded.Equal(test);
     }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamVectorV2NegativeCountTest(const Options& options)
+    {
+        struct Item
+        {
+            CPL_PARAM_VALUE(Int, value, 0);
+        };
+
+        struct TestParam
+        {
+            CPL_PARAM_VECTOR_V2(Item, children);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        String xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><test><children><count>-1</count></children></test>";
+
+        TestParamHolder loaded;
+        bool ok = loaded.Load(xml.c_str(), xml.size(), Cpl::ParamFormatXml);
+        if (ok)
+        {
+            CPL_LOG_SS(Error, "Load must fail for a negative <count>, but it returned true.");
+            return false;
+        }
+
+        return true;
+    }
 }

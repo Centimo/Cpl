@@ -25,6 +25,7 @@
 
 #include "Test/Test.h"
 #include "Cpl/String.h"
+#include <limits>
 
 namespace
 {
@@ -89,6 +90,18 @@ namespace Test
             }
         }
 
+        return true;
+    }
+
+    bool ParseUriAtColonTest(const Options& options)
+    {
+        auto parts = Cpl::ParseUri("user@host:8080");
+        if (parts[1] != "user" || parts[2] != "" || parts[3] != "host:8080")
+        {
+            CPL_LOG_SS(Error, "ParseUri(\"user@host:8080\") -> login='" << parts[1] << "' password='" << parts[2]
+                << "' path='" << parts[3] << "', expected login='user' password='' path='host:8080'.");
+            return false;
+        }
         return true;
     }
 
@@ -253,6 +266,44 @@ namespace Test
             (float)1, 
             (double)1);
         
+        return true;
+    }
+
+    bool ToStrZeroTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            const Cpl::String s = Cpl::ToStr(0.0);
+            const size_t point = s.find('.');
+            const size_t decimals = point == Cpl::String::npos ? 0 : s.size() - point - 1;
+            const size_t expected = std::numeric_limits<double>::digits10 + 1;
+            if (s != "0" && decimals < expected)
+            {
+                CPL_LOG_SS(Error, "ToStr(0.0) = '" << s << "', expected '0' or at least " << expected << " decimals.");
+                return false;
+            }
+            return true;
+        });
+    }
+
+    bool ToStrSizeMaxTest(const Options& options)
+    {
+        const size_t maxValue = std::numeric_limits<size_t>::max();
+        const Cpl::String expected = std::to_string(maxValue);
+        Cpl::String s = Cpl::ToStr<size_t>(maxValue);
+        if (s != expected)
+        {
+            CPL_LOG_SS(Error, "ToStr<size_t>(SIZE_MAX) = '" << s << "', expected '" << expected << "'.");
+            return false;
+        }
+
+        size_t roundTrip = 0;
+        Cpl::ToVal<size_t>(s, roundTrip);
+        if (roundTrip != maxValue)
+        {
+            CPL_LOG_SS(Error, "ToVal<size_t>('" << s << "') = " << roundTrip << ", expected " << maxValue << ".");
+            return false;
+        }
         return true;
     }
 

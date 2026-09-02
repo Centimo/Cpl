@@ -97,4 +97,45 @@ namespace Test
 
         return true;
     }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool TableSetCellOutOfRangeTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            Cpl::Table table = GetTestTable();
+            const String before = table.GenerateText();
+            table.SetCell(0, table.Height(), "out of range");
+            const String after = table.GenerateText();
+            if (after != before)
+            {
+                CPL_LOG_SS(Error, "TableSetCellOutOfRange: an out-of-range SetCell must leave the table unchanged, got:" << std::endl << after);
+                return false;
+            }
+            return true;
+        });
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool TableGenerateHtmlDuplicateCellpaddingTest(const Options& options)
+    {
+        Cpl::Table table = GetTestTable();
+
+        String html = table.GenerateHtml();
+
+        size_t count = 0, pos = 0;
+        while ((pos = html.find("cellpadding", pos)) != String::npos)
+        {
+            ++count;
+            pos += 1;
+        }
+        if (count != 1)
+        {
+            CPL_LOG_SS(Error, "TableGenerateHtmlDuplicateCellpadding: expected 1 'cellpadding' attribute, found " << count << ".");
+            return false;
+        }
+        return true;
+    }
 }

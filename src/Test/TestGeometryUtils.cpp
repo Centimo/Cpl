@@ -125,4 +125,93 @@ namespace Test
 
         return true;
     }
+
+    bool GeometryUtilsCrossScoreOverflowTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            typedef Cpl::Point<long long> PointL;
+            const int expected = Cpl::CrossScore(PointL(2342, 2817), PointL(957, 459), PointL(1601, 155), PointL(874, 1728));
+            const int score = Cpl::CrossScore(Point(2342, 2817), Point(957, 459), Point(1601, 155), Point(874, 1728));
+            if (score != expected)
+            {
+                CPL_LOG_SS(Error, "GeometryUtilsCrossScoreOverflow: expected score " << expected << ", got " << score);
+                return false;
+            }
+            return true;
+        });
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool GeometryUtilsOverlapsDegenerateTest(const Options& options)
+    {
+        Rect a(5, 5, 0, 0);
+        Rect b(5, 5, 0, 0);
+        if (a.Overlaps(b) != false)
+        {
+            CPL_LOG_SS(Error, "GeometryUtilsOverlapsDegenerate: two coincident zero-area rectangles must not overlap.");
+            return false;
+        }
+
+        Rect c(0, 0, 10, 10);
+        Rect d(5, 5, 10, 10);
+        if (c.Overlaps(d) != true)
+        {
+            CPL_LOG_SS(Error, "GeometryUtilsOverlapsDegenerate: normally overlapping rectangles must overlap.");
+            return false;
+        }
+
+        return true;
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool GeometryUtilsRectangleConvertRoundingTest(const Options& options)
+    {
+        typedef Cpl::Rectangle<ptrdiff_t> RectI;
+        typedef Cpl::Rectangle<double> RectD;
+
+        RectD source(0.6, 0.6, 1.6, 1.6);
+
+        RectI viaConstructor(source);
+
+        RectI viaAssignment;
+        viaAssignment = source;
+
+        if (viaConstructor.x != viaAssignment.x || viaConstructor.y != viaAssignment.y ||
+            viaConstructor.w != viaAssignment.w || viaConstructor.h != viaAssignment.h)
+        {
+            CPL_LOG_SS(Error, "GeometryUtilsRectangleConvertRounding: converting constructor gives (" <<
+                viaConstructor.x << ", " << viaConstructor.y << ", " << viaConstructor.w << ", " << viaConstructor.h <<
+                "), operator= gives (" <<
+                viaAssignment.x << ", " << viaAssignment.y << ", " << viaAssignment.w << ", " << viaAssignment.h << ").");
+            return false;
+        }
+        return true;
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool GeometryUtilsEmptyPolygonAccessTest(const Options& options)
+    {
+        bool boundingBoxOk = RunIsolated([]() -> bool
+        {
+            Polygon empty;
+            Rect bbox = Cpl::BoundingBox(empty);
+            return bbox.Empty();
+        });
+        if (!boundingBoxOk)
+            CPL_LOG_SS(Error, "GeometryUtilsEmptyPolygonAccess: BoundingBox() of an empty polygon crashed.");
+
+        bool hasPointOk = RunIsolated([]() -> bool
+        {
+            Polygon empty;
+            return Cpl::PolygonHasPoint(empty, Point(0, 0)) == false;
+        });
+        if (!hasPointOk)
+            CPL_LOG_SS(Error, "GeometryUtilsEmptyPolygonAccess: PolygonHasPoint() of an empty polygon crashed or returned true.");
+
+        return boundingBoxOk && hasPointOk;
+    }
 }

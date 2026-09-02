@@ -33,8 +33,10 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
 #include <signal.h>
 #include <unistd.h>
+#include <cerrno>
 #include <chrono>
 #include <thread>
 #endif
@@ -54,6 +56,18 @@ namespace Test
         }
         if (pid == 0)
         {
+            // ASan cannot map its shadow memory under RLIMIT_DATA, so sanitizer builds rely on the timeout alone.
+#if !defined(__SANITIZE_ADDRESS__)
+            rlimit dataLimit;
+            dataLimit.rlim_cur = size_t(1) << 30;
+            dataLimit.rlim_max = size_t(1) << 30;
+            setrlimit(RLIMIT_DATA, &dataLimit);
+#endif
+            rlimit coreLimit;
+            coreLimit.rlim_cur = 0;
+            coreLimit.rlim_max = 0;
+            setrlimit(RLIMIT_CORE, &coreLimit);
+
             bool result = false;
             try
             {
@@ -78,9 +92,11 @@ namespace Test
             const pid_t waited = waitpid(pid, &status, WNOHANG);
             if (waited == pid)
                 break;
-            if (waited < 0)
+            if (waited < 0 && errno != EINTR)
             {
-                CPL_LOG_SS(Error, "RunIsolated: waitpid() failed.");
+                CPL_LOG_SS(Error, "RunIsolated: waitpid() failed with errno " << errno << ".");
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0);
                 return false;
             }
             if (std::chrono::steady_clock::now() >= deadline)
@@ -105,7 +121,7 @@ namespace Test
         return true;
     }
 #else
-    bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs)
+    bool RunIsolated(const std::function<bool()>& body, size_t)
     {
         return body();
     }
@@ -135,13 +151,16 @@ namespace Test
     TEST_ADD(HasArg);
     TEST_ADD(HasArg1);
     TEST_ADD(HasArg2);
+    TEST_ADD(ArgsAliasPrefixConsumesToken);
 
     TEST_ADD(LogCallback);
     TEST_ADD(LogCallbackRaw);
     TEST_ADD(LogDateTime);
     TEST_ADD(LogId);
+    TEST_ADD(LogFileWriterDanglingUserData);
 
     TEST_ADD(ParseUri);
+    TEST_ADD(ParseUriAtColon);
 
     TEST_ADD(StartsWith);
     TEST_ADD(EndsWith);
@@ -151,10 +170,16 @@ namespace Test
     TEST_ADD(SeparateStringMulti);
     TEST_ADD(TimeToStr);
     TEST_ADD(ToStr);
+    TEST_ADD(ToStrZero);
+    TEST_ADD(ToStrSizeMax);
 
     TEST_ADD(PolygonHasPoint);
     TEST_ADD(PolygonOverlapsRectangle);
     TEST_ADD(PolygonOverlapsRectangleFloat);
+    TEST_ADD(GeometryUtilsCrossScoreOverflow);
+    TEST_ADD(GeometryUtilsOverlapsDegenerate);
+    TEST_ADD(GeometryUtilsRectangleConvertRounding);
+    TEST_ADD(GeometryUtilsEmptyPolygonAccess);
 
     TEST_ADD(ParamSimple);
     TEST_ADD(ParamSizetDefault);
@@ -166,15 +191,32 @@ namespace Test
     TEST_ADD(ParamMapBug);
     TEST_ADD(ParamLimited);
     TEST_ADD(ParamTemplate);
+    TEST_ADD(ParamMapEqualNodeSecondEntry);
+    TEST_ADD(ParamStructChildLoadError);
+    TEST_ADD(ParamMapCloneMergesInsteadOfReplacing);
+    TEST_ADD(ParamVectorResizeBeforeNameCheck);
+    TEST_ADD(ParamEnumToStrExplicitValueOutOfRange);
+    TEST_ADD(ParamLimitedConstOperatorMutates);
+    TEST_ADD(ParamLoadYamlRootSequenceDestroyed);
+    TEST_ADD(ParamValueEmptyStringRoundTrip);
+    TEST_ADD(ParamLimitedMacroUnparenthesizedArgs);
 
     TEST_ADD(ParamVectorV2);
     TEST_ADD(ParamMapV2);
+    TEST_ADD(ParamVectorV2NegativeCount);
 
     TEST_ADD(Prop);
+    TEST_ADD(PropStorageCopyUseAfterFree);
+    TEST_ADD(PropStorageAsChildCorruptsSiblingWalk);
+    TEST_ADD(PropTwoPropsInOneStructOverwrite);
 
     TEST_ADD(PerformanceSimple);
     TEST_ADD(PerformanceStdThread);
     TEST_ADD(PerformanceClear);
+    TEST_ADD(PerformanceHistogramExpand);
+    TEST_ADD(PerformanceHistogramQuantile);
+    TEST_ADD(PerformanceClearWhileHolderAlive);
+    TEST_ADD(PerformanceStorageSeparateInstances);
 #if defined(CPL_TEST_NORETURN)
     TEST_ADD(PerformanceNoReturn);
 #endif
@@ -184,16 +226,51 @@ namespace Test
 
     TEST_ADD(TableSimple);
     TEST_ADD(TableSortable);
+    TEST_ADD(TableSetCellOutOfRange);
+    TEST_ADD(TableGenerateHtmlDuplicateCellpadding);
+
+    TEST_ADD(HtmlWriteEndUnmatched);
+
+    TEST_ADD(UtilsConvertPtrdiffTruncates);
 
     TEST_ADD(YamlSimple);
     TEST_ADD(YamlParam);
+    TEST_ADD(YamlSequenceIteratorKey);
+    TEST_ADD(YamlSequencePushFront);
+    TEST_ADD(YamlSequenceInsert);
+    TEST_ADD(YamlNodeAssignFromChild);
+    TEST_ADD(YamlEmptyNodeShared);
+    TEST_ADD(YamlIteratorOfScalar);
+    TEST_ADD(YamlPlainScalarWithQuote);
+    TEST_ADD(YamlSerializeQuotedValue);
+    TEST_ADD(YamlBlockScalarQuotes);
+    TEST_ADD(YamlSequenceErase);
+    TEST_ADD(YamlNestedInlineSequence);
+    TEST_ADD(YamlParseDirectory);
+    TEST_ADD(YamlSerializeMultilineScalar);
 
     TEST_ADD(XmlAllocateString);
     TEST_ADD(XmlIterator);
+    TEST_ADD(XmlCDataPrefix);
+    TEST_ADD(XmlTrimWhitespaceUnderflow);
+    TEST_ADD(XmlFileOpenDirectory);
+    TEST_ADD(XmlUninitializedAttributeLinks);
+    TEST_ADD(XmlAllocatorNullCrash);
+    TEST_ADD(XmlDecimalReferenceHexDigit);
+    TEST_ADD(XmlCharacterReferenceOverflow);
+    TEST_ADD(XmlParseIgnoresLength);
+    TEST_ADD(XmlEndIteratorDecrement);
+    TEST_ADD(XmlWideCharClassification);
+    TEST_ADD(XmlParseErrorWhat);
+    TEST_ADD(XmlDeepNestingStackOverflow);
     TEST_ADD(ToValEmpty);
     TEST_ADD(DoFileModify);
     TEST_ADD(DoFileExistance);
     TEST_ADD(DoFileInfo);
+    TEST_ADD(FileMatchQuestionMark);
+    TEST_ADD(FileDirectoryPathAllDashes);
+    TEST_ADD(FileReadPastEof);
+    TEST_ADD(FileErrorsAsSuccess);
 
     bool Options::Required(const Group& group)
     {

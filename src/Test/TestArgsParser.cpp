@@ -73,6 +73,36 @@ namespace Test
 
         return a.Check("-h", "-?");
     }
+
+    struct TestArgsGetter : public Cpl::ArgsParser
+    {
+        TestArgsGetter(int argc, char* argv[])
+            : Cpl::ArgsParser(argc, argv, false) {}
+
+        Strings Values(const Strings& names) { return GetArgs(names, Strings(), false); }
+    };
+
+    bool ArgsAliasPrefixConsumesTokenTest(const Options& options)
+    {
+        std::vector<std::string> args = { "test", "-help", "value1", "value2" };
+        std::vector<char*> argv;
+        for (auto& a : args)
+            argv.push_back(const_cast<char*>(a.c_str()));
+
+        TestArgsGetter parser((int)argv.size(), argv.data());
+        Strings values = parser.Values({ "-h", "-help" });
+
+        if (values.size() != 1 || values[0] != "value1")
+        {
+            std::stringstream got;
+            for (size_t i = 0; i < values.size(); ++i)
+                got << (i ? ", " : "") << "\"" << values[i] << "\"";
+            CPL_LOG_SS(Error, "GetArgs({\"-h\",\"-help\"}) on a single \"-help value1 value2\" token expected "
+                << "{\"value1\"}, got {" << got.str() << "}");
+            return false;
+        }
+        return true;
+    }
 }
 
 

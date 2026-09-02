@@ -118,4 +118,36 @@ namespace Test
 
         return true;
     }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool LogFileWriterDanglingUserDataTest(const Options& options)
+    {
+        return RunIsolated([&options]() -> bool
+        {
+            Cpl::Log log;
+            int id1 = log.AddFileWriter(Cpl::Log::Debug, options.OutputPath("log_dangle_1.txt"));
+            log.Write(Cpl::Log::Debug, "before second writer");
+
+            int id2 = log.AddFileWriter(Cpl::Log::Debug, options.OutputPath("log_dangle_2.txt"));
+            if (id1 == 0 || id2 == 0)
+            {
+                CPL_LOG_SS(Error, "LogFileWriterDanglingUserData: could not open output files.");
+                return false;
+            }
+            log.Write(Cpl::Log::Debug, "after second writer");
+
+            std::ifstream ifs1(options.OutputPath("log_dangle_1.txt"));
+            std::stringstream content1;
+            content1 << ifs1.rdbuf();
+
+            if (content1.str().find("before second writer") == std::string::npos ||
+                content1.str().find("after second writer") == std::string::npos)
+            {
+                CPL_LOG_SS(Error, "LogFileWriterDanglingUserData: first log file is missing a message, content: '" << content1.str() << "'.");
+                return false;
+            }
+            return true;
+        });
+    }
 }

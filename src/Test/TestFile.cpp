@@ -28,6 +28,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <string>
 #include <set>
 
@@ -857,4 +859,90 @@ namespace Test
         }
         return false;
     };
+
+    bool FileMatchQuestionMarkTest(const Options& options) {
+        return RunIsolated([]() -> bool {
+            std::unique_ptr<char[]> filter(new char[3]);
+            filter[0] = 'a';
+            filter[1] = '?';
+            filter[2] = '\0';
+            std::unique_ptr<char[]> name(new char[2]);
+            name[0] = 'a';
+            name[1] = '\0';
+
+            bool matched = Match(filter.get(), name.get(), 2, 1);
+            if (matched) {
+                CPL_LOG_SS(Error, "Match(\"a?\", \"a\") expected false (pattern needs 2 characters), got true.");
+                return false;
+            }
+            return true;
+        });
+    }
+
+    bool FileDirectoryPathAllDashesTest(const Options& options) {
+        bool ok = true;
+
+        ok &= RunIsolated([]() -> bool {
+            const std::string allSlashes(30, '/'); // The root directory on POSIX, so only the read is checked.
+            (void)Cpl::DirectoryExists(allSlashes);
+            return true;
+        });
+
+        ok &= RunIsolated([]() -> bool {
+            const std::string allSpaces(30, ' ');
+            bool exists = Cpl::DirectoryExists(allSpaces);
+            if (exists) {
+                CPL_LOG_SS(Error, "DirectoryExists(30 spaces) expected false, got true.");
+                return false;
+            }
+            return true;
+        });
+
+        return ok;
+    }
+
+    bool FileReadPastEofTest(const Options& options) {
+        return RunIsolated([&options]() -> bool {
+            const Cpl::String path = options.OutputPath("file_read_past_eof.bin");
+            if (Cpl::WriteToFile(path, "abcde", 5) != -1) {
+                CPL_LOG_SS(Error, "Could not create '" << path << "'.");
+                return false;
+            }
+
+            Cpl::FileData data;
+            const size_t startPos = 1000000;
+            const size_t maxSize = std::numeric_limits<size_t>::max();
+            const Cpl::FileData::Error result = Cpl::ReadFile(path, data, startPos, maxSize);
+            Cpl::DeleteFile(path);
+
+            if (result) {
+                CPL_LOG_SS(Error, "ReadFile(startPos far past EOF) expected a failure code, got a usable result.");
+                return false;
+            }
+            return true;
+        });
+    }
+
+    bool FileErrorsAsSuccessTest(const Options& options) {
+        return RunIsolated([&options]() -> bool {
+#ifdef __linux__
+            const char writeData[] = { 1, 2, 3, 4, 5 };
+            int written = Cpl::WriteToFile("/dev/full", writeData, sizeof(writeData));
+            if (written == -1) {
+                CPL_LOG_SS(Error, "WriteToFile(\"/dev/full\", ...) expected failure, got success.");
+                return false;
+            }
+#endif
+
+            const Cpl::String dirPath = options.OutputPath("file_errors_dir");
+            Cpl::CreatePath(dirPath);
+            std::vector<uint8_t> loaded;
+            bool loadedOk = Cpl::LoadBinaryData(dirPath, loaded);
+            if (loadedOk) {
+                CPL_LOG_SS(Error, "LoadBinaryData(a directory) expected false, got true.");
+                return false;
+            }
+            return true;
+        });
+    }
 }

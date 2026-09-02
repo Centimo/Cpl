@@ -26,6 +26,8 @@
 
 #include "Cpl/Performance.h"
 
+#include <cmath>
+
 namespace Test
 {
     static void TestFuncV0()
@@ -145,6 +147,112 @@ namespace Test
 #endif
         return true;
 }
+
+    bool PerformanceHistogramExpandTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        Cpl::PerformanceHistogram histogram(4);
+        const uint64_t samples[] = { 0, 0, 1, 1, 2, 3, 5, 6, 7, 7 };
+        for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i)
+            histogram.Add(samples[i]);
+
+        // Bins after the expansion are [4, 2, 1, 3] with step 2; 25% of 10 samples is reached inside bin 0: 0 + 2/4 * 2.
+        double quantile = histogram.Quantile(25.0);
+        double expected = Cpl::Miliseconds(1);
+        if (std::abs(quantile - expected) > 1e-9)
+        {
+            CPL_LOG_SS(Error, "PerformanceHistogramExpand: Quantile(25) expected " << expected << ", got " << quantile);
+            return false;
+        }
+        return true;
+#else
+        CPL_LOG_SS(Warning, "PerformanceHistogramExpand: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool PerformanceHistogramQuantileTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            Cpl::PerformanceHistogram histogram(4);
+            const uint64_t samples[] = { 0, 0, 1, 1, 2, 3 };
+            for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i)
+                histogram.Add(samples[i]);
+
+            // Bins are [2, 2, 1, 1] with step 1; 90% of 6 samples is reached inside bin 2: 2 + 1/1 * 1.
+            double quantile = histogram.Quantile(90.0);
+            double expected = Cpl::Miliseconds(3);
+            if (std::abs(quantile - expected) > 1e-9)
+            {
+                CPL_LOG_SS(Error, "PerformanceHistogramQuantile: Quantile(90) expected " << expected << ", got " << quantile);
+                return false;
+            }
+            return true;
+        });
+#else
+        CPL_LOG_SS(Warning, "PerformanceHistogramQuantile: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool PerformanceClearWhileHolderAliveTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            Cpl::PerformanceStorage::Global().Clear();
+            Cpl::PerformanceMeasurer* pm = Cpl::PerformanceStorage::Global().Get("PerformanceClearWhileHolderAlive");
+            {
+                Cpl::PerformanceHolder holder(pm);
+                Cpl::PerformanceStorage::Global().Clear();
+            }
+            return true;
+        });
+#else
+        CPL_LOG_SS(Warning, "PerformanceClearWhileHolderAlive: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool PerformanceStorageSeparateInstancesTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            Cpl::PerformanceStorage storage1;
+            Cpl::PerformanceStorage storage2;
+
+            Cpl::PerformanceMeasurer* pm1 = storage1.Get("PerformanceStorageSeparateInstances1");
+            pm1->Enter();
+            pm1->Leave();
+
+            Cpl::PerformanceMeasurer* pm2 = storage2.Get("PerformanceStorageSeparateInstances2");
+            pm2->Enter();
+            pm2->Leave();
+
+            if (storage1.Merged().size() != 1 || storage2.Merged().size() != 1)
+            {
+                CPL_LOG_SS(Error, "PerformanceStorageSeparateInstances: expected 1 measurer in each storage, got "
+                    << storage1.Merged().size() << " and " << storage2.Merged().size());
+                return false;
+            }
+            return true;
+        });
+#else
+        CPL_LOG_SS(Warning, "PerformanceStorageSeparateInstances: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
 
 #if defined(CPL_TEST_NORETURN)
     static void* TestFuncV6(void*)

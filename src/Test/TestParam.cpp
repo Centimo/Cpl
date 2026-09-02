@@ -27,6 +27,8 @@
 
 #include "Cpl/Param.h"
 
+#include <type_traits>
+
 namespace Test
 {
     bool ParamSimpleTest(const Options& options)
@@ -430,5 +432,274 @@ namespace Test
     }
 }
 
+//---------------------------------------------------------------------------------------------
 
+namespace Test
+{
+    bool ParamMapEqualNodeSecondEntryTest(const Options& options)
+    {
+        struct ValueParam
+        {
+            CPL_PARAM_VALUE(Int, value, 0);
+        };
+
+        struct TestParam
+        {
+            CPL_PARAM_MAP(String, ValueParam, map);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        TestParamHolder a, b;
+        a().map()["A"].value() = 1;
+        a().map()["B"].value() = 2;
+        b().map()["A"].value() = 1;
+        b().map()["B"].value() = 3;
+
+        if (a.Equal(b))
+        {
+            CPL_LOG_SS(Error, "ParamMap::Equal must return false when maps differ in the second entry, but it returned true.");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamStructChildLoadErrorTest(const Options& options)
+    {
+        struct Inner
+        {
+            CPL_PARAM_VALUE(Int, x, 0);
+        };
+
+        struct TestParam
+        {
+            CPL_PARAM_STRUCT(Inner, inner);
+            CPL_PARAM_VALUE(Int, after, 0);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        String yaml = "test:\n  inner: 5\n  after: 7\n";
+
+        TestParamHolder loaded;
+        bool ok = loaded.Load(yaml.c_str(), yaml.size(), Cpl::ParamFormatYaml);
+        if (ok)
+        {
+            CPL_LOG_SS(Error, "Load must fail when a child node ('inner') has the wrong YAML type "
+                "(scalar instead of map), but it returned true.");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamMapCloneMergesInsteadOfReplacingTest(const Options& options)
+    {
+        struct ValueParam
+        {
+            CPL_PARAM_VALUE(Int, value, 0);
+        };
+
+        struct TestParam
+        {
+            CPL_PARAM_MAP(String, ValueParam, map);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        TestParamHolder src, dst;
+        src().map()["A"].value() = 1;
+        dst().map()["B"].value() = 2;
+
+        dst.Clone(src);
+
+        if (dst().map().size() != 1 || dst().map().find("B") != dst().map().end())
+        {
+            CPL_LOG_SS(Error, "Clone must replace the destination map with the source map (only key 'A' "
+                "expected), but the destination has " << dst().map().size() << " entries and still has 'B'.");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamVectorResizeBeforeNameCheckTest(const Options& options)
+    {
+        struct Item
+        {
+            CPL_PARAM_VALUE(Int, value, 0);
+        };
+
+        struct TestParam
+        {
+            CPL_PARAM_VECTOR(Item, children);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        String xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><test><children><bogus><value>7</value></bogus></children></test>";
+
+        TestParamHolder loaded;
+        const bool ok = loaded.Load(xml.c_str(), xml.size(), Cpl::ParamFormatXml);
+
+        if (loaded().children().size() != 0)
+        {
+            CPL_LOG_SS(Error, "Vector must stay empty when its only child is not named 'item', but it "
+                "was resized to " << loaded().children().size() << " element(s) (Load returned " << ok << ").");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamLimitedConstOperatorMutatesTest(const Options& options)
+    {
+        struct TestParam
+        {
+            CPL_PARAM_LIMITED(Int, value, 0, -5, 5);
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        TestParamHolder holder;
+        const TestParamHolder& constHolder = holder;
+        typedef decltype(constHolder().value()) ConstAccess;
+
+        if (std::is_assignable<ConstAccess, Int>::value)
+        {
+            CPL_LOG_SS(Error, "The value obtained through a const object must not be assignable, "
+                "but ParamLimited::operator() const returns a writable accessor.");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamLoadYamlRootSequenceDestroyedTest(const Options& options)
+    {
+        struct TestParam
+        {
+            CPL_PARAM_VALUE(Int, value, 0);
+        };
+
+        struct TestParamHolder : public Cpl::ParamStruct<TestParam>
+        {
+            TestParamHolder() : Cpl::ParamStruct<TestParam>("test") {}
+            bool LoadYaml(Cpl::Yaml::Node& root) { return LoadNodeYaml(root); }
+        };
+
+        Cpl::Yaml::Node root;
+        try
+        {
+            Cpl::Yaml::Parse(root, std::string("- 1\n- 2\n"));
+        }
+        catch (const Cpl::Yaml::Exception& e)
+        {
+            CPL_LOG_SS(Error, "Parse failed: " << e.what());
+            return false;
+        }
+
+        TestParamHolder loaded;
+        loaded.LoadYaml(root);
+
+        if (!root.IsSequence() || root.Size() != 2)
+        {
+            CPL_LOG_SS(Error, "Loading a param from a YAML document must not modify the document; "
+                "the root sequence of 2 became type " << root.Type() << " of size " << root.Size());
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamValueEmptyStringRoundTripTest(const Options& options)
+    {
+        struct TestParam
+        {
+            CPL_PARAM_VALUE(String, name, "Default");
+        };
+
+        CPL_PARAM_HOLDER(TestParamHolder, TestParam, test);
+
+        TestParamHolder test, loaded;
+        test().name() = "";
+
+        test.Save(options.OutputPath("param_empty_string.xml"), true);
+
+        if (!loaded.Load(options.OutputPath("param_empty_string.xml")))
+            return false;
+
+        if (loaded().name() != "")
+        {
+            CPL_LOG_SS(Error, "Empty string did not survive the round trip; expected '', got '" << loaded().name() << "'");
+            return false;
+        }
+
+        return true;
+    }
+
+    //---------------------------------------------------------------------------------------------
+
+    bool ParamLimitedMacroUnparenthesizedArgsTest(const Options& options)
+    {
+#if defined(NDEBUG)
+        return true; // Only the assert in the constructor is affected.
+#endif
+        struct TestParam14
+        {
+            CPL_PARAM_LIMITED(Int, value, 100, true ? -1 : 0, 10);
+        };
+
+        bool constructedWithoutAbort = RunIsolated([]() -> bool
+        {
+            TestParam14 param;
+            (void)param;
+            return true;
+        });
+
+        if (constructedWithoutAbort)
+        {
+            CPL_LOG_SS(Error, "assert(min <= value && value <= max) must fire for value=100 outside "
+                "[min,max]=[-1,10], but the unparenthesized macro arguments turn it into a no-op and "
+                "construction succeeded without aborting.");
+            return false;
+        }
+
+        return true;
+    }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+CPL_PARAM_ENUM0(Foo, FooA = 3, FooB);
+
+namespace Test
+{
+    bool ParamEnumToStrExplicitValueOutOfRangeTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            Cpl::String value = Cpl::ToStr(FooB);
+            if (value != "FooB")
+            {
+                CPL_LOG_SS(Error, "ToStr(FooB) expected 'FooB', got '" << value << "'");
+                return false;
+            }
+            return true;
+        });
+    }
+}
 
