@@ -56,8 +56,8 @@ namespace Test
         }
         if (pid == 0)
         {
-            // ASan cannot map its shadow memory under RLIMIT_DATA, so sanitizer builds rely on the timeout alone.
-#if !defined(__SANITIZE_ADDRESS__)
+            // ASan and TSan cannot map their shadow memory under RLIMIT_DATA, so sanitizer builds rely on the timeout alone.
+#if !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__)
             rlimit dataLimit;
             dataLimit.rlim_cur = size_t(1) << 30;
             dataLimit.rlim_max = size_t(1) << 30;
@@ -158,6 +158,7 @@ namespace Test
     TEST_ADD(LogDateTime);
     TEST_ADD(LogId);
     TEST_ADD(LogFileWriterDanglingUserData);
+    TEST_ADD(LogConcurrentFlags);
 
     TEST_ADD(ParseUri);
     TEST_ADD(ParseUriAtColon);
@@ -217,6 +218,7 @@ namespace Test
     TEST_ADD(PerformanceHistogramQuantile);
     TEST_ADD(PerformanceClearWhileHolderAlive);
     TEST_ADD(PerformanceStorageSeparateInstances);
+    TEST_ADD(PerformanceStorageConcurrentReport);
 #if defined(CPL_TEST_NORETURN)
     TEST_ADD(PerformanceNoReturn);
 #endif

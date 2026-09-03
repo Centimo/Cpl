@@ -26,6 +26,7 @@
 
 #include "Cpl/Performance.h"
 
+#include <atomic>
 #include <cmath>
 
 namespace Test
@@ -248,6 +249,50 @@ namespace Test
         });
 #else
         CPL_LOG_SS(Warning, "PerformanceStorageSeparateInstances: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    bool PerformanceStorageConcurrentReportTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            const size_t workers = 4, samples = 2000;
+            Cpl::PerformanceStorage storage;
+            std::atomic<size_t> running(workers);
+            std::vector<std::thread> threads;
+            for (size_t worker = 0; worker < workers; ++worker)
+            {
+                threads.push_back(std::thread([&storage, &running, worker]()
+                {
+                    const Cpl::String prefix = "PerformanceStorageConcurrentReport" + std::to_string(worker) + "_";
+                    for (size_t sample = 0; sample < samples; ++sample)
+                        Cpl::PerformanceHolder holder(storage.Get(prefix + std::to_string(sample)));
+                    running--;
+                }));
+            }
+            size_t reports = 0;
+            while (running > 0)
+            {
+                storage.Report();
+                storage.Merged("PerformanceStorageConcurrentReport0_0");
+                storage.Clear();
+                ++reports;
+            }
+            for (size_t worker = 0; worker < workers; ++worker)
+                threads[worker].join();
+            if (reports == 0)
+            {
+                CPL_LOG_SS(Error, "PerformanceStorageConcurrentReport: the reporting loop did not overlap the workers.");
+                return false;
+            }
+            return true;
+        }, 60000);
+#else
+        CPL_LOG_SS(Warning, "PerformanceStorageConcurrentReport: skipped, CPL_PERF_ENABLE is not defined.");
         return true;
 #endif
     }

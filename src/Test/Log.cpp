@@ -27,6 +27,8 @@
 
 #include "Cpl/Log.h"
 
+#include <atomic>
+
 namespace Test
 {
     static void CustomFileWriter(const char* msg, void* userData)
@@ -149,5 +151,78 @@ namespace Test
             }
             return true;
         });
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
+    struct LogConcurrentFlagsContext
+    {
+        std::atomic<size_t> received;
+        std::atomic<size_t> malformed;
+
+        LogConcurrentFlagsContext()
+            : received(0)
+            , malformed(0)
+        {
+        }
+    };
+
+    // The writer thread alternates between thread-id-only and prefix-only flags, so every line must be
+    // exactly "[NNN]: log" or "Debug: log". Any other shape means Write() formatted with a mix of both.
+    static void LogConcurrentFlagsWriter(const char* msg, void* userData)
+    {
+        LogConcurrentFlagsContext& context = *(LogConcurrentFlagsContext*)userData;
+        const Cpl::String line(msg);
+        const bool threadShape = line.size() == 11 && line[0] == '[' && line.compare(4, 7, "]: log\n") == 0;
+        const bool prefixShape = line == "Debug: log\n";
+        context.received++;
+        if (!threadShape && !prefixShape)
+            context.malformed++;
+    }
+
+    static void LogConcurrentFlagsRawNoop(Cpl::Log::Level, const char*, void*)
+    {
+    }
+
+    bool LogConcurrentFlagsTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            const size_t messages = 20000, switches = 20000;
+            const Cpl::Log::Flags threadFlags = Cpl::Log::Flags(Cpl::Log::WriteThreadId | Cpl::Log::PrettyThreadId);
+            const Cpl::Log::Flags prefixFlags = Cpl::Log::WritePrefix;
+            Cpl::Log log;
+            LogConcurrentFlagsContext context;
+            log.SetFlags(threadFlags);
+            log.AddWriter(Cpl::Log::Debug, LogConcurrentFlagsWriter, &context);
+            std::atomic<bool> started(false);
+
+            std::thread writer([&log, &started]()
+            {
+                while (!started)
+                    std::this_thread::yield();
+                for (size_t message = 0; message < messages; ++message)
+                    log.Write(Cpl::Log::Debug, "log");
+            });
+            std::thread switcher([&log, &started, &threadFlags, &prefixFlags]()
+            {
+                started = true;
+                for (size_t i = 0; i < switches; ++i)
+                {
+                    log.SetFlags(i % 2 ? prefixFlags : threadFlags);
+                    int id = log.AddWriter(Cpl::Log::Debug, LogConcurrentFlagsRawNoop, NULL);
+                    log.RemoveWriter(id);
+                }
+            });
+            writer.join();
+            switcher.join();
+
+            if (context.malformed != 0 || context.received != messages)
+            {
+                CPL_LOG_SS(Error, "LogConcurrentFlags: " << context.malformed << " malformed lines, " << context.received << " of " << messages << " received.");
+                return false;
+            }
+            return true;
+        }, 60000);
     }
 }
