@@ -580,7 +580,12 @@ namespace Cpl
     {
         std::time_t t;
         std::time(&t);
-        std::tm* tm = ::localtime(&t);
+        std::tm tm;
+#if defined(_WIN32)
+        ::localtime_s(&tm, &t);
+#else
+        ::localtime_r(&t, &tm);
+#endif
         struct timeval current_time;
 #if _WIN32
         FILETIME file_time;
@@ -598,12 +603,12 @@ namespace Cpl
 #endif
         std::stringstream ss;
         if (date)
-            ss << ToStr(tm->tm_year + 1900, 4) << "."  << ToStr(tm->tm_mon + 1, 2) << "." << ToStr(tm->tm_mday, 2);
+            ss << ToStr(tm.tm_year + 1900, 4) << "."  << ToStr(tm.tm_mon + 1, 2) << "." << ToStr(tm.tm_mday, 2);
         if (date && time)
             ss << " ";
         if (time)
         {
-            ss << ToStr(tm->tm_hour, 2) << ":" << ToStr(tm->tm_min, 2) << ":" << ToStr(tm->tm_sec, 2);
+            ss << ToStr(tm.tm_hour, 2) << ":" << ToStr(tm.tm_min, 2) << ":" << ToStr(tm.tm_sec, 2);
             if (msDigits > 0)
             {
                 if (msDigits > CPL_CURRENT_DATE_TIME_PRECISION)

@@ -88,18 +88,6 @@ namespace Cpl
         }
 
         /*!
-        * \fn PerformanceHistogram(const PerformanceHistogram& hs)
-        * \brief Copies another histogram, including its bins and current range.
-        * \param [in] hs - Histogram to copy.
-        */
-        CPL_INLINE PerformanceHistogram(const PerformanceHistogram& hs)
-            : _shift(hs._shift)
-            , _max(hs._max)
-            , _histogram(hs._histogram)
-        {
-        }
-
-        /*!
         * \fn bool Enable() const
         * \brief Checks whether the histogram stores samples.
         * \return true if the histogram has at least one bin, false if it was constructed with size 0.
@@ -148,7 +136,7 @@ namespace Cpl
         CPL_INLINE double Quantile(double quantile) const
         {
             quantile = std::max(0.0, std::min(quantile, 100.0));
-            uint64_t total = 0, max = 0;
+            uint64_t total = 0;
             for (size_t i = 0; i < _histogram.size(); i++)
                 total += _histogram[i];
             uint64_t threshold = uint64_t(quantile * total / 100.0), lower = 0, upper = 0;
@@ -186,6 +174,25 @@ namespace Cpl
         uint32_t _hist;
         bool _entered, _paused;
         PerformanceHistogram _histogram;
+        mutable std::mutex _mutex;
+
+        // Delegation target of the copy constructor: the guard is created by the delegating constructor
+        // and keeps pm locked while its fields are read.
+        CPL_INLINE PerformanceMeasurer(const PerformanceMeasurer& pm, const std::lock_guard<std::mutex>&)
+            : _name(pm._name)
+            , _start(pm._start)
+            , _current(pm._current)
+            , _total(pm._total)
+            , _min(pm._min)
+            , _max(pm._max)
+            , _count(pm._count)
+            , _flop(pm._flop)
+            , _hist(pm._hist)
+            , _entered(pm._entered)
+            , _paused(pm._paused)
+            , _histogram(pm._histogram)
+        {
+        }
 
     public:
         /*!
@@ -197,13 +204,13 @@ namespace Cpl
         */
         CPL_INLINE PerformanceMeasurer(const String& name, int64_t flop = 0, uint32_t hist = 0)
             : _name(name)
-            , _flop(flop)
-            , _count(0)
             , _start(0)
             , _current(0)
             , _total(0)
             , _min(std::numeric_limits<int64_t>::max())
             , _max(std::numeric_limits<int64_t>::min())
+            , _count(0)
+            , _flop(flop)
             , _hist(hist)
             , _entered(false)
             , _paused(false)
@@ -217,19 +224,33 @@ namespace Cpl
         * \param [in] pm - Measurer to copy.
         */
         CPL_INLINE PerformanceMeasurer(const PerformanceMeasurer& pm)
-            : _name(pm._name)
-            , _flop(pm._flop)
-            , _count(pm._count)
-            , _start(pm._start)
-            , _current(pm._current)
-            , _total(pm._total)
-            , _min(pm._min)
-            , _max(pm._max)
-            , _hist(pm._hist)
-            , _entered(pm._entered)
-            , _paused(pm._paused)
-            , _histogram(pm._histogram)
+            : PerformanceMeasurer(pm, std::lock_guard<std::mutex>(pm._mutex))
         {
+        }
+
+        /*!
+        * \fn PerformanceMeasurer& operator = (const PerformanceMeasurer& pm)
+        * \brief Replaces the name and the accumulated statistics with a copy of another measurer's.
+        * \param [in] pm - Measurer to copy.
+        * \return Reference to this measurer.
+        */
+        CPL_INLINE PerformanceMeasurer& operator = (const PerformanceMeasurer& pm)
+        {
+            const PerformanceMeasurer copy(pm);
+            std::lock_guard<std::mutex> lock(_mutex);
+            _name = copy._name;
+            _flop = copy._flop;
+            _count = copy._count;
+            _start = copy._start;
+            _current = copy._current;
+            _total = copy._total;
+            _min = copy._min;
+            _max = copy._max;
+            _hist = copy._hist;
+            _entered = copy._entered;
+            _paused = copy._paused;
+            _histogram = copy._histogram;
+            return *this;
         }
 
         /*!
@@ -239,6 +260,7 @@ namespace Cpl
         */
         CPL_INLINE void Enter()
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             if (!_entered)
             {
                 _entered = true;
@@ -255,6 +277,7 @@ namespace Cpl
         */
         CPL_INLINE void Leave(bool pause = false)
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             if (_entered || _paused)
             {
                 if (_entered)
@@ -283,13 +306,15 @@ namespace Cpl
         */
         CPL_INLINE void Merge(const PerformanceMeasurer& other)
         {
-            assert(_name == other._name);
-            _count += other._count;
-            _total += other._total;
-            _min = std::min(_min, other._min);
-            _max = std::max(_max, other._max);
+            const PerformanceMeasurer copy(other);
+            std::lock_guard<std::mutex> lock(_mutex);
+            assert(_name == copy._name);
+            _count += copy._count;
+            _total += copy._total;
+            _min = std::min(_min, copy._min);
+            _max = std::max(_max, copy._max);
             if (_histogram.Enable())
-                _histogram.Merge(other._histogram);
+                _histogram.Merge(copy._histogram);
         }
 
         /*!
@@ -300,6 +325,7 @@ namespace Cpl
         */
         CPL_INLINE void Reset()
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             _start = 0;
             _current = 0;
             _total = 0;
@@ -318,6 +344,7 @@ namespace Cpl
         */
         CPL_INLINE double Average() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _count ? (Miliseconds(_total) / _count) : 0;
         }
 
@@ -328,6 +355,7 @@ namespace Cpl
         */
         CPL_INLINE double GFlops() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _count && _flop && _total > 0 ? (double(_flop) * _count / Miliseconds(_total) / 1000000.0) : 0;
         }
 
@@ -338,6 +366,7 @@ namespace Cpl
         */
         CPL_INLINE double Min() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _count ? Miliseconds(_min) : 0.0;
         }
 
@@ -348,6 +377,7 @@ namespace Cpl
         */
         CPL_INLINE double Max() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _count ? Miliseconds(_max) : 0.0;
         }
 
@@ -359,6 +389,7 @@ namespace Cpl
         */
         CPL_INLINE double Quantile(double quantile) const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _count && _histogram.Enable() ? _histogram.Quantile(quantile) : 0.0;
         }
 
@@ -369,6 +400,7 @@ namespace Cpl
         */
         CPL_INLINE double Total() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return Miliseconds(_total);
         }
 
@@ -379,6 +411,7 @@ namespace Cpl
         */
         CPL_INLINE size_t Count() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return (size_t)_count;
         }
 
@@ -389,6 +422,7 @@ namespace Cpl
         */
         CPL_INLINE String Name() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _name;
         }
 
@@ -399,19 +433,20 @@ namespace Cpl
         */
         CPL_INLINE String ToStr() const
         {
+            const PerformanceMeasurer copy(*this);
             std::stringstream ss;
-            ss << Cpl::ToStr(Total(), 0) << " ms" << " / " << Count() << " = " << Cpl::ToStr(Average(), 3) << " ms";
-            ss << " {min = " << Cpl::ToStr(Min(), 3);
-            ss << "; max = " << Cpl::ToStr(Max(), 3);
-            if (_histogram.Enable())
+            ss << Cpl::ToStr(copy.Total(), 0) << " ms" << " / " << copy.Count() << " = " << Cpl::ToStr(copy.Average(), 3) << " ms";
+            ss << " {min = " << Cpl::ToStr(copy.Min(), 3);
+            ss << "; max = " << Cpl::ToStr(copy.Max(), 3);
+            if (copy._histogram.Enable())
             {
-                ss << "; q50 = " << Cpl::ToStr(Quantile(50.0), 3);
-                ss << "; q90 = " << Cpl::ToStr(Quantile(90.0), 3);
-                ss << "; q99 = " << Cpl::ToStr(Quantile(99.0), 3);
+                ss << "; q50 = " << Cpl::ToStr(copy.Quantile(50.0), 3);
+                ss << "; q90 = " << Cpl::ToStr(copy.Quantile(90.0), 3);
+                ss << "; q99 = " << Cpl::ToStr(copy.Quantile(99.0), 3);
             }
             ss << "}";
-            if (_flop)
-                ss << " " << Cpl::ToStr(GFlops(), 1) << " GFlops";
+            if (copy._flop)
+                ss << " " << Cpl::ToStr(copy.GFlops(), 1) << " GFlops";
             return ss.str();
         }
     };
@@ -521,13 +556,14 @@ namespace Cpl
         */
         CPL_INLINE PerformanceMeasurer* Get(const String& name, int64_t flop = 0, uint32_t hist = 0)
         {
-            FunctionMap& thread = ThisThread();
+            ThreadData& thread = ThisThread();
+            std::lock_guard<std::mutex> lock(thread.mutex);
             PerformanceMeasurer* pm = NULL;
-            FunctionMap::iterator it = thread.find(name);
-            if (it == thread.end())
+            FunctionMap::iterator it = thread.map.find(name);
+            if (it == thread.map.end())
             {
                 pm = new PerformanceMeasurer(name, flop, hist);
-                thread[name].reset(pm);
+                thread.map[name].reset(pm);
             }
             else
                 pm = it->second.get();
@@ -560,7 +596,8 @@ namespace Cpl
             std::lock_guard<std::mutex> lock(_mutex);
             for (ThreadMap::const_iterator thread = _map.begin(); thread != _map.end(); ++thread)
             {
-                for (FunctionMap::const_iterator function = thread->second.begin(); function != thread->second.end(); ++function)
+                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
+                for (FunctionMap::const_iterator function = thread->second.map.begin(); function != thread->second.map.end(); ++function)
                 {
                     if (merged.find(function->first) == merged.end())
                         merged[function->first].reset(new PerformanceMeasurer(*function->second));
@@ -583,8 +620,9 @@ namespace Cpl
             std::lock_guard<std::mutex> lock(_mutex);
             for (ThreadMap::const_iterator thread = _map.begin(); thread != _map.end(); ++thread)
             {
-                FunctionMap::const_iterator function = thread->second.find(name);
-                if (function != thread->second.end() && function->second->Average() != 0)
+                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
+                FunctionMap::const_iterator function = thread->second.map.find(name);
+                if (function != thread->second.map.end() && function->second->Average() != 0)
                 {
                     if (merged.Average() == 0)
                         merged = *function->second;
@@ -605,8 +643,11 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             for (ThreadMap::iterator thread = _map.begin(); thread != _map.end(); ++thread)
-                for (FunctionMap::iterator function = thread->second.begin(); function != thread->second.end(); ++function)
+            {
+                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
+                for (FunctionMap::iterator function = thread->second.map.begin(); function != thread->second.map.end(); ++function)
                     function->second->Reset();
+            }
         }
 
         /*!
@@ -639,7 +680,13 @@ namespace Cpl
         }
 
     private:
-        typedef std::map<std::thread::id, FunctionMap> ThreadMap;
+        // Measurers of one thread. The mutex orders Get() in the owner thread against Merged() and Clear().
+        struct ThreadData
+        {
+            mutable std::mutex mutex;
+            FunctionMap map;
+        };
+        typedef std::map<std::thread::id, ThreadData> ThreadMap;
 
         ThreadMap _map;
         mutable std::mutex _mutex;
@@ -650,16 +697,16 @@ namespace Cpl
         struct ThreadCacheEntry
         {
             std::weak_ptr<int> alive;
-            FunctionMap* map;
+            ThreadData* data;
         };
         typedef std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> ThreadCache;
 
-        CPL_INLINE FunctionMap& ThisThread()
+        CPL_INLINE ThreadData& ThisThread()
         {
             static thread_local ThreadCache cache;
             ThreadCache::iterator it = cache.find(this);
             if (it != cache.end() && !it->second.alive.expired())
-                return *it->second.map;
+                return *it->second.data;
             for (ThreadCache::iterator stale = cache.begin(); stale != cache.end();)
             {
                 if (stale->second.alive.expired())
@@ -670,9 +717,9 @@ namespace Cpl
             std::lock_guard<std::mutex> lock(_mutex);
             ThreadCacheEntry entry;
             entry.alive = _alive;
-            entry.map = &_map[std::this_thread::get_id()];
+            entry.data = &_map[std::this_thread::get_id()];
             cache[this] = entry;
-            return *entry.map;
+            return *entry.data;
         }
     };
 }

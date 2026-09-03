@@ -28,9 +28,9 @@
 #include "Cpl/String.h"
 #include "Cpl/Console.h"
 
+#include <atomic>
 #include <mutex>
 #include <map>
-#include <deque>
 #include <thread>
 
 #if defined(CPL_LOG_ENABLE)
@@ -126,8 +126,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, callback, NULL, NULL, userData);
-            _levelMax = std::max(_levelMax, level);
-            _rawOnly = false;
+            UpdateWriterSummary();
             return _writerId;
         }
 
@@ -143,7 +142,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, callbackRaw, NULL, userData);
-            _levelMax = std::max(_levelMax, level);
+            UpdateWriterSummary();
             return _writerId;
         }
 
@@ -159,7 +158,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, NULL, callbackRaw, userData);
-            _levelMax = std::max(_levelMax, level);
+            UpdateWriterSummary();
             return _writerId;
         }
 
@@ -183,36 +182,35 @@ namespace Cpl
         */
         int AddFileWriter(Level level, const String& fileName)
         {
-            std::ofstream* file = NULL;
+            std::lock_guard<std::mutex> lock(_mutex);
+            const int id = _writerId + 1;
+            std::ofstream& file = _files[id];
+            file.open(fileName);
+            if (!file.is_open())
             {
-                std::lock_guard<std::mutex> lock(_mutex);
-                _files.emplace_back(fileName);
-                if (!_files.back().is_open())
-                {
-                    _files.pop_back();
-                    return 0;
-                }
-                file = &_files.back();
+                _files.erase(id);
+                return 0;
             }
-            return AddWriter(level, FileWrite, file);
+            _writerId = id;
+            _writers[id] = Writer(level, FileWrite, NULL, NULL, &file);
+            UpdateWriterSummary();
+            return id;
         }
 
         /*!
         * \fn bool RemoveWriter(int id)
-        * \brief Removes a previously registered writer.
+        * \brief Removes a previously registered writer. The file of a file writer is closed.
         * \param [in] id - Writer identifier returned by AddWriter, AddStdWriter or AddFileWriter.
         * \return true if the writer was found and removed, false otherwise.
         */
         bool RemoveWriter(int id)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            if (_writers.find(id) != _writers.end())
-            {
-                _writers.erase(id);
-                return true;
-            }
-            else
+            if (_writers.erase(id) == 0)
                 return false;
+            _files.erase(id);
+            UpdateWriterSummary();
+            return true;
         }
 
         /*!
@@ -222,6 +220,7 @@ namespace Cpl
         */
         void SetFlags(Flags flags)
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             _flags = flags;
         }
 
@@ -232,6 +231,7 @@ namespace Cpl
         */
         Flags GetFlags() const
         {
+            std::lock_guard<std::mutex> lock(_mutex);
             return _flags;
         }
 
@@ -240,10 +240,13 @@ namespace Cpl
         * \brief Checks whether a message of the given severity would be written.
         * \param [in] level - Severity to check.
         * \return true if level is not None and is less or equal to the maximum registered writer level.
+        * \note Lock-free: the maximum level may be stale while writers are being added or removed.
+        *       Write() re-checks the level of every writer under the lock, so a stale answer only costs
+        *       an unnecessary lock, never a message delivered to a removed writer.
         */
         CPL_INLINE bool Enable(Level level) const
         {
-            return level != None && _levelMax >= level;
+            return level != None && _levelMax.load(std::memory_order_relaxed) >= level;
         }
 
         /*!
@@ -259,6 +262,7 @@ namespace Cpl
             if (!Enable(level))
                 return;
 
+            std::lock_guard<std::mutex> lock(_mutex);
             std::stringstream ss;
 
             if (!_rawOnly)
@@ -283,7 +287,6 @@ namespace Cpl
                     std::thread::id id = std::this_thread::get_id();
                     if (_flags & PrettyThreadId)
                     {
-                        std::lock_guard<std::mutex> lock(_mutex);
                         if (_prettyThreadNames.find(id) == _prettyThreadNames.end())
                             _prettyThreadNames[id] = ToStr((int)_prettyThreadNames.size(), 3);
                         ss << "[" << _prettyThreadNames[id] << "]";
@@ -306,6 +309,7 @@ namespace Cpl
                     }
                     else
                         ss << prefixes[level];
+                    pref = true;
                 }
                 if (pref)
                     ss << ": ";
@@ -314,7 +318,6 @@ namespace Cpl
                 ss << std::endl;
             }
 
-            std::lock_guard<std::mutex> lock(_mutex);
             for (Writers::const_iterator it = _writers.begin(); it != _writers.end(); ++it)
             {
                 const Writer& writer = it->second;
@@ -339,7 +342,7 @@ namespace Cpl
         */
         Level MaxLevel() const
         {
-            return _levelMax;
+            return _levelMax.load(std::memory_order_relaxed);
         }
 
         /*!
@@ -377,10 +380,25 @@ namespace Cpl
 
         mutable std::mutex _mutex;
         mutable std::map<std::thread::id, String> _prettyThreadNames;
-        mutable std::deque<std::ofstream> _files;
-        Level _levelMax;
+        std::map<int, std::ofstream> _files;
+        // Read without the mutex by Enable(); everything else is guarded by _mutex.
+        std::atomic<Level> _levelMax;
         Flags _flags;
         bool _rawOnly;
+
+        void UpdateWriterSummary()
+        {
+            Level levelMax = None;
+            bool rawOnly = true;
+            for (Writers::const_iterator it = _writers.begin(); it != _writers.end(); ++it)
+            {
+                levelMax = std::max(levelMax, it->second.level);
+                if (it->second.callback)
+                    rawOnly = false;
+            }
+            _levelMax = levelMax;
+            _rawOnly = rawOnly;
+        }
 
         static void StdWrite(const char* msg, void*)
         {
