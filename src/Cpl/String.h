@@ -673,7 +673,6 @@ namespace Cpl
             prefixSize = prefixPos + 3;
         }
 
-        bool hasCredentials = false;
         auto atPos = uri.find('@');
         if (atPos != std::string::npos)
         {

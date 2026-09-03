@@ -107,10 +107,10 @@ namespace Cpl
         * \brief Constructs an empty logger with no writers, level None and DefaultFlags.
         */
         Log()
-            : _levelMax(None)
+            : _writerId(0)
+            , _levelMax(None)
             , _flags(DefaultFlags)
             , _rawOnly(true)
-            , _writerId(0)
         {
         }
 
