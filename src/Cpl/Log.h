@@ -39,6 +39,9 @@ namespace Cpl
     /*! @ingroup cpl_log
     * \class Log
     * \brief Thread-safe logger with multiple writers, severity levels and configurable message formatting.
+    * \note Writer callbacks are invoked while the internal lock is held. A callback must not call Write, AddWriter,
+    *       AddStdWriter, AddFileWriter, RemoveWriter, SetFlags or GetFlags on the same Log: that deadlocks.
+    *       Enable and MaxLevel are lock-free and may be called from a callback.
     * \note The Log class is compiled only when CPL_LOG_ENABLE is defined. Otherwise the logging macros are empty.
     */
     class Log
@@ -256,6 +259,7 @@ namespace Cpl
         * \param [in] level - Severity of the message.
         * \param [in] message - Message text.
         * \param [in] id - Target writer identifier, or -1 to send the message to every matching writer.
+        * \note The callbacks run under the internal lock, so they are serialized and must not call back into this Log.
         */
         void Write(Level level, const String& message, int id = -1) const
         {
