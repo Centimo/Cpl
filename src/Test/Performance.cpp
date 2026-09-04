@@ -299,6 +299,55 @@ namespace Test
 
     //-------------------------------------------------------------------------------------------------
 
+    bool PerformanceStorageThreadIdReuseTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            const Cpl::String name = "PerformanceStorageThreadIdReuse";
+            Cpl::PerformanceStorage storage;
+            std::thread::id firstId, secondId;
+            double secondTotal = 0.0;
+
+            std::thread first([&storage, &name, &firstId]()
+            {
+                firstId = std::this_thread::get_id();
+                storage.Get(name)->Enter();
+            });
+            first.join();
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+            std::thread second([&storage, &name, &secondId, &secondTotal]()
+            {
+                secondId = std::this_thread::get_id();
+                Cpl::PerformanceMeasurer* pm = storage.Get(name);
+                pm->Enter();
+                pm->Leave();
+                secondTotal = pm->Total();
+            });
+            second.join();
+
+            if (firstId != secondId)
+            {
+                CPL_LOG_SS(Warning, "PerformanceStorageThreadIdReuse: the thread id was not reused, nothing to check.");
+                return true;
+            }
+            if (secondTotal >= 100.0)
+            {
+                CPL_LOG_SS(Error, "PerformanceStorageThreadIdReuse: the second thread inherited the first thread's open sample, total " << secondTotal << " ms.");
+                return false;
+            }
+            return true;
+        });
+#else
+        CPL_LOG_SS(Warning, "PerformanceStorageThreadIdReuse: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
 #if defined(CPL_TEST_NORETURN)
     static void* TestFuncV6(void*)
     {
