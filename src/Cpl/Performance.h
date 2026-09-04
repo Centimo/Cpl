@@ -513,8 +513,9 @@ namespace Cpl
     /*! @ingroup cpl_performance
     * \class PerformanceStorage
     * \brief Thread-local registry of PerformanceMeasurer objects used by the performance macros.
-    * \note Each thread has its own map. Merged(), Merged(name) and Report() combine samples across threads.
-    *       The class is compiled only when CPL_PERF_ENABLE is defined.
+    * \note Each thread has its own map. When a thread exits, its completed samples are merged into a map of
+    *       finished threads and its own map is released. Merged(), Merged(name) and Report() combine the samples
+    *       of the live and the finished threads. The class is compiled only when CPL_PERF_ENABLE is defined.
     */
     class PerformanceStorage
     {
@@ -542,9 +543,12 @@ namespace Cpl
         * \brief Constructs an empty storage with no thread maps.
         */
         PerformanceStorage()
-            : _alive(std::make_shared<int>(0))
+            : _state(std::make_shared<State>())
         {
         }
+
+        PerformanceStorage(const PerformanceStorage&) = delete;
+        PerformanceStorage& operator = (const PerformanceStorage&) = delete;
 
         /*!
         * \fn PerformanceMeasurer* Get(const String& name, int64_t flop = 0, uint32_t hist = 0)
@@ -593,17 +597,12 @@ namespace Cpl
         FunctionMap Merged() const
         {
             FunctionMap merged;
-            std::lock_guard<std::mutex> lock(_mutex);
-            for (ThreadMap::const_iterator thread = _map.begin(); thread != _map.end(); ++thread)
+            std::lock_guard<std::mutex> lock(_state->mutex);
+            MergeInto(merged, _state->finished);
+            for (ThreadMap::const_iterator thread = _state->threads.begin(); thread != _state->threads.end(); ++thread)
             {
-                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
-                for (FunctionMap::const_iterator function = thread->second.map.begin(); function != thread->second.map.end(); ++function)
-                {
-                    if (merged.find(function->first) == merged.end())
-                        merged[function->first].reset(new PerformanceMeasurer(*function->second));
-                    else
-                        merged[function->first]->Merge(*function->second);
-                }
+                std::lock_guard<std::mutex> threadLock(thread->second->mutex);
+                MergeInto(merged, thread->second->map);
             }
             return merged;
         }
@@ -617,35 +616,30 @@ namespace Cpl
         PerformanceMeasurer Merged(const String & name) const
         {
             PerformanceMeasurer merged(name);
-            std::lock_guard<std::mutex> lock(_mutex);
-            for (ThreadMap::const_iterator thread = _map.begin(); thread != _map.end(); ++thread)
+            std::lock_guard<std::mutex> lock(_state->mutex);
+            MergeNamed(merged, _state->finished, name);
+            for (ThreadMap::const_iterator thread = _state->threads.begin(); thread != _state->threads.end(); ++thread)
             {
-                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
-                FunctionMap::const_iterator function = thread->second.map.find(name);
-                if (function != thread->second.map.end() && function->second->Average() != 0)
-                {
-                    if (merged.Average() == 0)
-                        merged = *function->second;
-                    else
-                        merged.Merge(*function->second);
-                }
+                std::lock_guard<std::mutex> threadLock(thread->second->mutex);
+                MergeNamed(merged, thread->second->map, name);
             }
             return merged;
         }
 
         /*!
         * \fn void Clear()
-        * \brief Resets the accumulated statistics of every thread-local measurer.
-        * \note Measurers are reset in place, not destroyed, so a pointer previously returned by Get()
+        * \brief Resets the accumulated statistics of every thread-local measurer and drops the samples of finished threads.
+        * \note Measurers of live threads are reset in place, not destroyed, so a pointer previously returned by Get()
         *       stays valid after Clear() is called.
         */
         void Clear()
         {
-            std::lock_guard<std::mutex> lock(_mutex);
-            for (ThreadMap::iterator thread = _map.begin(); thread != _map.end(); ++thread)
+            std::lock_guard<std::mutex> lock(_state->mutex);
+            _state->finished.clear();
+            for (ThreadMap::iterator thread = _state->threads.begin(); thread != _state->threads.end(); ++thread)
             {
-                std::lock_guard<std::mutex> threadLock(thread->second.mutex);
-                for (FunctionMap::iterator function = thread->second.map.begin(); function != thread->second.map.end(); ++function)
+                std::lock_guard<std::mutex> threadLock(thread->second->mutex);
+                for (FunctionMap::iterator function = thread->second->map.begin(); function != thread->second->map.end(); ++function)
                     function->second->Reset();
             }
         }
@@ -686,39 +680,110 @@ namespace Cpl
             mutable std::mutex mutex;
             FunctionMap map;
         };
-        typedef std::map<std::thread::id, ThreadData> ThreadMap;
+        typedef std::shared_ptr<ThreadData> ThreadDataPtr;
+        // Live threads keyed by registration number; a thread id is not used as a key because the
+        // system reuses it after the thread exits.
+        typedef std::map<uint64_t, ThreadDataPtr> ThreadMap;
 
-        ThreadMap _map;
-        mutable std::mutex _mutex;
-        // Liveness token: a thread-local cache entry made for a storage that was destroyed (and possibly
-        // replaced by another one at the same address) expires together with it.
-        std::shared_ptr<int> _alive;
+        // Shared with the thread-local cache entries through a weak_ptr: the exit-time merge of a thread
+        // either keeps the state alive until it is done or, if the storage is already gone, skips it.
+        struct State
+        {
+            std::mutex mutex;
+            ThreadMap threads;
+            FunctionMap finished;
+            uint64_t registration;
+
+            State()
+                : registration(0)
+            {
+            }
+        };
+        std::shared_ptr<State> _state;
 
         struct ThreadCacheEntry
         {
-            std::weak_ptr<int> alive;
-            ThreadData* data;
+            std::weak_ptr<State> state;
+            uint64_t key;
+            ThreadDataPtr data;
         };
-        typedef std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> ThreadCache;
+
+        // Thread-local map from storage to its record for this thread. Its destructor runs at thread exit
+        // and merges the completed samples of every live storage into the finished map.
+        struct ThreadCache
+        {
+            std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> entries;
+
+            ~ThreadCache()
+            {
+                for (std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator it = entries.begin(); it != entries.end(); ++it)
+                    Detach(it->second);
+            }
+        };
+
+        static void MergeInto(FunctionMap& target, const FunctionMap& source)
+        {
+            for (FunctionMap::const_iterator function = source.begin(); function != source.end(); ++function)
+            {
+                FunctionMap::iterator existing = target.find(function->first);
+                if (existing == target.end())
+                    target[function->first].reset(new PerformanceMeasurer(*function->second));
+                else
+                    existing->second->Merge(*function->second);
+            }
+        }
+
+        static void MergeNamed(PerformanceMeasurer& merged, const FunctionMap& source, const String& name)
+        {
+            FunctionMap::const_iterator function = source.find(name);
+            if (function == source.end() || function->second->Average() == 0)
+                return;
+            if (merged.Average() == 0)
+                merged = *function->second;
+            else
+                merged.Merge(*function->second);
+        }
+
+        // A storage created at the address of a destroyed one must not reuse the old entry, so the
+        // entry has to point at this storage's own state, not merely at a state that is still alive.
+        CPL_INLINE bool OwnsEntry(const ThreadCacheEntry& entry) const
+        {
+            return !entry.state.owner_before(_state) && !_state.owner_before(entry.state) && !entry.state.expired();
+        }
+
+        static void Detach(const ThreadCacheEntry& entry)
+        {
+            std::shared_ptr<State> state = entry.state.lock();
+            if (!state)
+                return;
+            std::lock_guard<std::mutex> lock(state->mutex);
+            {
+                std::lock_guard<std::mutex> threadLock(entry.data->mutex);
+                MergeInto(state->finished, entry.data->map);
+            }
+            state->threads.erase(entry.key);
+        }
 
         CPL_INLINE ThreadData& ThisThread()
         {
             static thread_local ThreadCache cache;
-            ThreadCache::iterator it = cache.find(this);
-            if (it != cache.end() && !it->second.alive.expired())
+            std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator it = cache.entries.find(this);
+            if (it != cache.entries.end() && OwnsEntry(it->second))
                 return *it->second.data;
-            for (ThreadCache::iterator stale = cache.begin(); stale != cache.end();)
+            for (std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator stale = cache.entries.begin(); stale != cache.entries.end();)
             {
-                if (stale->second.alive.expired())
-                    stale = cache.erase(stale);
+                if (stale->second.state.expired())
+                    stale = cache.entries.erase(stale);
                 else
                     ++stale;
             }
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::mutex> lock(_state->mutex);
             ThreadCacheEntry entry;
-            entry.alive = _alive;
-            entry.data = &_map[std::this_thread::get_id()];
-            cache[this] = entry;
+            entry.state = _state;
+            entry.key = _state->registration++;
+            entry.data = std::make_shared<ThreadData>();
+            _state->threads[entry.key] = entry.data;
+            cache.entries[this] = entry;
             return *entry.data;
         }
     };

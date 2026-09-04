@@ -326,6 +326,7 @@ namespace Test
                 pm->Leave();
                 secondTotal = pm->Total();
             });
+            // join() returns after the thread-local destructors of the thread, so its samples are already merged.
             second.join();
 
             if (firstId != secondId)
@@ -336,6 +337,12 @@ namespace Test
             if (secondTotal >= 100.0)
             {
                 CPL_LOG_SS(Error, "PerformanceStorageThreadIdReuse: the second thread inherited the first thread's open sample, total " << secondTotal << " ms.");
+                return false;
+            }
+            if (storage.Merged(name).Count() != 1 || storage.Merged().size() != 1)
+            {
+                CPL_LOG_SS(Error, "PerformanceStorageThreadIdReuse: expected the single completed sample of the finished thread, got "
+                    << storage.Merged(name).Count() << " samples and " << storage.Merged().size() << " names.");
                 return false;
             }
             return true;
