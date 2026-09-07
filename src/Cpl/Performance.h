@@ -562,16 +562,10 @@ namespace Cpl
         {
             ThreadData& thread = ThisThread();
             std::lock_guard<std::mutex> lock(thread.mutex);
-            PerformanceMeasurer* pm = NULL;
             FunctionMap::iterator it = thread.map.find(name);
             if (it == thread.map.end())
-            {
-                pm = new PerformanceMeasurer(name, flop, hist);
-                thread.map[name].reset(pm);
-            }
-            else
-                pm = it->second.get();
-            return pm;
+                it = thread.map.insert(std::make_pair(name, PmPtr(new PerformanceMeasurer(name, flop, hist)))).first;
+            return it->second.get();
         }
 
         /*!
@@ -706,6 +700,11 @@ namespace Cpl
             std::weak_ptr<State> state;
             uint64_t key;
             ThreadDataPtr data;
+
+            ThreadCacheEntry()
+                : key(0)
+            {
+            }
         };
 
         // Thread-local map from storage to its record for this thread. Its destructor runs at thread exit
@@ -777,13 +776,16 @@ namespace Cpl
                 else
                     ++stale;
             }
+            // The cache slot is created first and filled last: if the registration below throws, the slot
+            // stays empty, which OwnsEntry() rejects, the pruning loop above erases and Detach() skips.
+            ThreadCacheEntry& slot = cache.entries[this];
             std::lock_guard<std::mutex> lock(_state->mutex);
             ThreadCacheEntry entry;
             entry.state = _state;
             entry.key = _state->registration++;
             entry.data = std::make_shared<ThreadData>();
             _state->threads[entry.key] = entry.data;
-            cache.entries[this] = entry;
+            slot = entry;
             return *entry.data;
         }
     };
