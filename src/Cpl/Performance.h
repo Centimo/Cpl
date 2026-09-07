@@ -748,7 +748,7 @@ namespace Cpl
         // entry has to point at this storage's own state, not merely at a state that is still alive.
         CPL_INLINE bool OwnsEntry(const ThreadCacheEntry& entry) const
         {
-            return !entry.state.owner_before(_state) && !_state.owner_before(entry.state) && !entry.state.expired();
+            return !entry.state.owner_before(_state) && !_state.owner_before(entry.state);
         }
 
         static void Detach(const ThreadCacheEntry& entry)

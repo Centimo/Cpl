@@ -578,4 +578,36 @@ namespace Test
             return true;
         }, 20000);
     }
+
+    // A stream buffer whose every read fails, as a file buffer does on a read error.
+    struct XmlFailingStreamBuffer : public std::streambuf
+    {
+        int_type underflow() override
+        {
+            throw std::ios_base::failure("read error");
+        }
+    };
+
+    bool XmlFileStreamReadErrorTest(const Options& options)
+    {
+        using namespace Cpl::Xml;
+
+        XmlFailingStreamBuffer buffer;
+        std::istream stream(&buffer);
+        try
+        {
+            File<char> file(stream);
+        }
+        catch (const std::runtime_error&)
+        {
+            return true;
+        }
+        catch (const std::exception& e)
+        {
+            CPL_LOG_SS(Error, "File(std::istream&) must report a read error as std::runtime_error, got: " << e.what());
+            return false;
+        }
+        CPL_LOG_SS(Error, "File(std::istream&) must throw on a read error, but it returned normally");
+        return false;
+    }
 }

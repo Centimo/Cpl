@@ -2946,7 +2946,8 @@ namespace Cpl
             /*!
             * \fn File(std::basic_istream<Ch> & is)
             * \brief Reads the entire seekable stream into the buffer and appends a zero terminator.
-            * \param [in,out] is - Input stream. skipws is cleared. Throws std::runtime_error on a read error.
+            * \param [in,out] is - Input stream. skipws is cleared. A read error surfaces as the std::ios_base::failure
+            *                     thrown by the stream buffer (a std::runtime_error).
             */
             File(std::basic_istream<Ch> & is)
             {
@@ -2954,8 +2955,6 @@ namespace Cpl
                 is.seekg(0, std::ios::beg);
                 std::istreambuf_iterator<Ch> begin(is), end;
                 decltype(_data) tdata(begin, end);
-                if (is.bad())
-                    throw std::runtime_error("error reading stream");
                 tdata.push_back(0);
                 _data = std::move(tdata);
             }

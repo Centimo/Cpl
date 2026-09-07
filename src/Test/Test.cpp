@@ -268,6 +268,7 @@ namespace Test
     TEST_ADD(XmlWideCharClassification);
     TEST_ADD(XmlParseErrorWhat);
     TEST_ADD(XmlDeepNestingStackOverflow);
+    TEST_ADD(XmlFileStreamReadError);
     TEST_ADD(ToValEmpty);
     TEST_ADD(DoFileModify);
     TEST_ADD(DoFileExistance);
