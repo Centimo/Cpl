@@ -355,6 +355,64 @@ namespace Test
 
     //-------------------------------------------------------------------------------------------------
 
+#if defined(CPL_PERF_ENABLE)
+    // Constructed before the first sample of its thread, so it is destroyed after the thread cache of the
+    // storage; its destructor records a sample when that cache is already gone.
+    struct PerformanceLateSampleContext
+    {
+        Cpl::PerformanceStorage* storage;
+        const Cpl::String* name;
+
+        PerformanceLateSampleContext()
+            : storage(NULL)
+            , name(NULL)
+        {
+        }
+
+        ~PerformanceLateSampleContext()
+        {
+            if (storage)
+            {
+                Cpl::PerformanceHolder holder(storage->Get(*name));
+            }
+        }
+    };
+#endif
+
+    bool PerformanceStorageLateSampleTest(const Options& options)
+    {
+#if defined(CPL_PERF_ENABLE)
+        return RunIsolated([]() -> bool
+        {
+            const Cpl::String name = "PerformanceStorageLateSample";
+            Cpl::PerformanceStorage storage;
+            std::thread thread([&storage, &name]()
+            {
+                static thread_local PerformanceLateSampleContext context;
+                context.storage = &storage;
+                context.name = &name;
+                Cpl::PerformanceHolder holder(storage.Get(name));
+            });
+            thread.join();
+
+            Cpl::PerformanceStorage::FunctionMap merged = storage.Merged();
+            Cpl::PerformanceStorage::FunctionMap::const_iterator it = merged.find(name);
+            const size_t count = it == merged.end() ? 0 : it->second->Count();
+            if (count != 2)
+            {
+                CPL_LOG_SS(Error, "PerformanceStorageLateSample: expected the sample of the thread body and the sample of the late destructor, got " << count << " samples.");
+                return false;
+            }
+            return true;
+        });
+#else
+        CPL_LOG_SS(Warning, "PerformanceStorageLateSample: skipped, CPL_PERF_ENABLE is not defined.");
+        return true;
+#endif
+    }
+
+    //-------------------------------------------------------------------------------------------------
+
 #if defined(CPL_TEST_NORETURN)
     static void* TestFuncV6(void*)
     {

@@ -222,6 +222,7 @@ namespace Test
     TEST_ADD(PerformanceStorageSeparateInstances);
     TEST_ADD(PerformanceStorageConcurrentReport);
     TEST_ADD(PerformanceStorageThreadIdReuse);
+    TEST_ADD(PerformanceStorageLateSample);
 #if defined(CPL_TEST_NORETURN)
     TEST_ADD(PerformanceNoReturn);
 #endif
