@@ -47,6 +47,12 @@ namespace Test
     * On platforms without fork the body is called directly.
     */
     bool RunIsolated(const std::function<bool()>& body, size_t timeoutMs = 3000);
+
+    /*!
+    * Tells whether RunIsolated runs the body in a child process. When it does not, a body that aborts
+    * takes the whole test application down, so such a test has to be skipped.
+    */
+    bool CanRunIsolated();
 }
 
 #include "Test/Options.h"

@@ -260,7 +260,9 @@ namespace Test
 #if defined(CPL_PERF_ENABLE)
         return RunIsolated([]() -> bool
         {
-            const size_t workers = 4, samples = 2000;
+            const size_t workers = 4;
+            // Static: MSVC requires a capture for a local constant used inside a lambda, gcc and clang do not.
+            static const size_t samples = 2000;
             Cpl::PerformanceStorage storage;
             std::atomic<size_t> running(workers);
             std::vector<std::thread> threads;

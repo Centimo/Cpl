@@ -120,10 +120,20 @@ namespace Test
         }
         return true;
     }
+
+    bool CanRunIsolated()
+    {
+        return true;
+    }
 #else
     bool RunIsolated(const std::function<bool()>& body, size_t)
     {
         return body();
+    }
+
+    bool CanRunIsolated()
+    {
+        return false;
     }
 #endif
 

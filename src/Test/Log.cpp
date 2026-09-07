@@ -188,7 +188,8 @@ namespace Test
     {
         return RunIsolated([]() -> bool
         {
-            const size_t messages = 20000, switches = 20000;
+            // Static: MSVC requires a capture for a local constant used inside a lambda, gcc and clang do not.
+            static const size_t messages = 20000, switches = 20000;
             const Cpl::Log::Flags threadFlags = Cpl::Log::Flags(Cpl::Log::WriteThreadId | Cpl::Log::PrettyThreadId);
             const Cpl::Log::Flags prefixFlags = Cpl::Log::WritePrefix;
             Cpl::Log log;

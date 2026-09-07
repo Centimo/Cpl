@@ -658,6 +658,11 @@ namespace Test
 #if defined(NDEBUG)
         return true; // Only the assert in the constructor is affected.
 #endif
+        if (!CanRunIsolated())
+        {
+            CPL_LOG_SS(Warning, "ParamLimitedMacroUnparenthesizedArgs: skipped, the assert cannot be survived without a child process.");
+            return true;
+        }
         struct TestParam14
         {
             CPL_PARAM_LIMITED(Int, value, 100, true ? -1 : 0, 10);
