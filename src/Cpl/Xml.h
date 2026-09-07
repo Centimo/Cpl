@@ -1357,8 +1357,9 @@ namespace Cpl
         private:
 
             // Bounds ParseElement recursion so a pathologically nested document fails cleanly instead of
-            // overflowing the stack.
-            static const size_t MAX_PARSE_DEPTH = 1000;
+            // overflowing the stack. 256 is the default limit of libxml2; every level costs three frames,
+            // and 1000 levels overflow the 1 MB default stack of a Windows debug build.
+            static const size_t MAX_PARSE_DEPTH = 256;
             size_t _parseDepth;
 
             struct DepthGuard
