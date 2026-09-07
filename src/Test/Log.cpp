@@ -256,4 +256,60 @@ namespace Test
         }
         return true;
     }
+
+    //-------------------------------------------------------------------------------------------------
+
+    struct LogReentrantCallbackContext
+    {
+        Cpl::Log log;
+        int selfRemovingId;
+        size_t pongs;
+        size_t selfRemovingReceived;
+
+        LogReentrantCallbackContext()
+            : selfRemovingId(0)
+            , pongs(0)
+            , selfRemovingReceived(0)
+        {
+        }
+    };
+
+    // Answers "ping" with a nested Write on the same logger.
+    static void LogReentrantEchoWriter(Cpl::Log::Level, const char* msg, void* userData)
+    {
+        LogReentrantCallbackContext& context = *(LogReentrantCallbackContext*)userData;
+        if (Cpl::String(msg) == "ping")
+            context.log.Write(Cpl::Log::Debug, "pong");
+        else
+            context.pongs++;
+    }
+
+    // Removes itself on the first message it receives; it must get nothing after that, even within the same dispatch.
+    static void LogReentrantSelfRemovingWriter(Cpl::Log::Level, const char*, void* userData)
+    {
+        LogReentrantCallbackContext& context = *(LogReentrantCallbackContext*)userData;
+        context.selfRemovingReceived++;
+        context.log.RemoveWriter(context.selfRemovingId);
+    }
+
+    bool LogReentrantCallbackTest(const Options& options)
+    {
+        return RunIsolated([]() -> bool
+        {
+            LogReentrantCallbackContext context;
+            context.log.AddWriter(Cpl::Log::Debug, LogReentrantEchoWriter, &context);
+            context.selfRemovingId = context.log.AddWriter(Cpl::Log::Debug, LogReentrantSelfRemovingWriter, &context);
+
+            context.log.Write(Cpl::Log::Debug, "ping");
+            context.log.Write(Cpl::Log::Debug, "ping");
+
+            if (context.pongs != 2 || context.selfRemovingReceived != 1)
+            {
+                CPL_LOG_SS(Error, "LogReentrantCallback: expected 2 pongs and 1 message to the self-removing writer, got "
+                    << context.pongs << " and " << context.selfRemovingReceived);
+                return false;
+            }
+            return true;
+        }, 5000);
+    }
 }

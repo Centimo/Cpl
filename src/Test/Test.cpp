@@ -160,6 +160,7 @@ namespace Test
     TEST_ADD(LogFileWriterDanglingUserData);
     TEST_ADD(LogConcurrentFlags);
     TEST_ADD(LogRemoveWriterRecomputesLevel);
+    TEST_ADD(LogReentrantCallback);
 
     TEST_ADD(ParseUri);
     TEST_ADD(ParseUriAtColon);

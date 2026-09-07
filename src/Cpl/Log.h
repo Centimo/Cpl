@@ -31,6 +31,7 @@
 #include <atomic>
 #include <mutex>
 #include <map>
+#include <vector>
 #include <thread>
 
 #if defined(CPL_LOG_ENABLE)
@@ -39,9 +40,10 @@ namespace Cpl
     /*! @ingroup cpl_log
     * \class Log
     * \brief Thread-safe logger with multiple writers, severity levels and configurable message formatting.
-    * \note Writer callbacks are invoked while the internal lock is held. A callback must not call Write, AddWriter,
-    *       AddStdWriter, AddFileWriter, RemoveWriter, SetFlags or GetFlags on the same Log: that deadlocks.
-    *       Enable and MaxLevel are lock-free and may be called from a callback.
+    * \note Writer callbacks are invoked while the internal lock is held, so they never run concurrently. The lock is
+    *       recursive: a callback may call any method of the same Log, including Write. A writer removed from a callback
+    *       receives no further messages, not even the one being dispatched. A callback that writes to the same Log
+    *       unconditionally recurses without bound; it has to write only for messages it did not produce itself.
     * \note The Log class is compiled only when CPL_LOG_ENABLE is defined. Otherwise the logging macros are empty.
     */
     class Log
@@ -127,7 +129,7 @@ namespace Cpl
         */
         int AddWriter(Level level, Callback callback, void* userData)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, callback, NULL, NULL, userData);
             UpdateWriterSummary();
             return _writerId;
@@ -143,7 +145,7 @@ namespace Cpl
         */
         int AddWriter(Level level, CallbackRaw callbackRaw, void* userData)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, callbackRaw, NULL, userData);
             UpdateWriterSummary();
             return _writerId;
@@ -159,7 +161,7 @@ namespace Cpl
         */
         int AddWriter(Level level, CallbackRawFunc callbackRaw, void* userData)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, NULL, callbackRaw, userData);
             UpdateWriterSummary();
             return _writerId;
@@ -185,7 +187,7 @@ namespace Cpl
         */
         int AddFileWriter(Level level, const String& fileName)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             const int id = _writerId + 1;
             std::ofstream& file = _files[id];
             file.open(fileName);
@@ -208,7 +210,7 @@ namespace Cpl
         */
         bool RemoveWriter(int id)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             if (_writers.erase(id) == 0)
                 return false;
             _files.erase(id);
@@ -223,7 +225,7 @@ namespace Cpl
         */
         void SetFlags(Flags flags)
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             _flags = flags;
         }
 
@@ -234,7 +236,7 @@ namespace Cpl
         */
         Flags GetFlags() const
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             return _flags;
         }
 
@@ -259,14 +261,14 @@ namespace Cpl
         * \param [in] level - Severity of the message.
         * \param [in] message - Message text.
         * \param [in] id - Target writer identifier, or -1 to send the message to every matching writer.
-        * \note The callbacks run under the internal lock, so they are serialized and must not call back into this Log.
+        * \note The callbacks run under the recursive internal lock; see the class note for the rules of calling back into this Log.
         */
         void Write(Level level, const String& message, int id = -1) const
         {
             if (!Enable(level))
                 return;
 
-            std::lock_guard<std::mutex> lock(_mutex);
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
             std::stringstream ss;
 
             if (!_rawOnly)
@@ -322,20 +324,27 @@ namespace Cpl
                 ss << std::endl;
             }
 
+            // A callback may add or remove writers, so dispatch by identifier over a snapshot and look every
+            // writer up again before calling it. Identifiers are never reused.
+            std::vector<int> targets;
             for (Writers::const_iterator it = _writers.begin(); it != _writers.end(); ++it)
+                if (level <= it->second.level && (id == -1 || id == it->first))
+                    targets.push_back(it->first);
+            const String line = ss.str();
+            for (size_t i = 0; i < targets.size(); ++i)
             {
+                Writers::const_iterator it = _writers.find(targets[i]);
+                if (it == _writers.end())
+                    continue;
                 const Writer& writer = it->second;
-                if (level <= writer.level && (id == -1 || id == it->first))
-                {
-                    if (writer.callback)
-                        writer.callback(ss.str().c_str(), writer.userData);
-                    else if (writer.callbackRaw)
-                        writer.callbackRaw(level, message.c_str(), writer.userData);
-                    else if (writer.callbackRawFunc)
-                        writer.callbackRawFunc(level, message.c_str(), writer.userData);
-                    else
-                        assert(0);
-                }
+                if (writer.callback)
+                    writer.callback(line.c_str(), writer.userData);
+                else if (writer.callbackRaw)
+                    writer.callbackRaw(level, message.c_str(), writer.userData);
+                else if (writer.callbackRawFunc)
+                    writer.callbackRawFunc(level, message.c_str(), writer.userData);
+                else
+                    assert(0);
             }
         }
 
@@ -382,7 +391,7 @@ namespace Cpl
         Writers _writers;
         int _writerId;
 
-        mutable std::mutex _mutex;
+        mutable std::recursive_mutex _mutex;
         mutable std::map<std::thread::id, String> _prettyThreadNames;
         std::map<int, std::ofstream> _files;
         // Read without the mutex by Enable(); everything else is guarded by _mutex.
