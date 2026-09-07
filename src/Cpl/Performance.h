@@ -514,8 +514,10 @@ namespace Cpl
     * \class PerformanceStorage
     * \brief Thread-local registry of PerformanceMeasurer objects used by the performance macros.
     * \note Each thread has its own map. When a thread exits, its completed samples are merged into a map of
-    *       finished threads and its own map is released. Merged(), Merged(name) and Report() combine the samples
-    *       of the live and the finished threads. The class is compiled only when CPL_PERF_ENABLE is defined.
+    *       finished threads and its own map is released. A sample recorded after that, by the destructor of a
+    *       thread-local or static object, is kept as a record of a live thread until the storage is destroyed.
+    *       Merged(), Merged(name) and Report() combine the samples of the live and the finished threads.
+    *       The class is compiled only when CPL_PERF_ENABLE is defined.
     */
     class PerformanceStorage
     {
@@ -707,17 +709,44 @@ namespace Cpl
             }
         };
 
-        // Thread-local map from storage to its record for this thread. Its destructor runs at thread exit
-        // and merges the completed samples of every live storage into the finished map.
-        struct ThreadCache
-        {
-            std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> entries;
+        // Map from storage to its record for this thread.
+        typedef std::unordered_map<const PerformanceStorage*, ThreadCacheEntry> ThreadCache;
 
-            ~ThreadCache()
+        // The pointer and the flag are trivially destructible, so they stay valid after the thread-local
+        // destructors have run; ThreadCacheOwner below is the only thread-local object with a destructor.
+        static ThreadCache*& CachePointer()
+        {
+            static thread_local ThreadCache* cache = NULL;
+            return cache;
+        }
+
+        static bool& CacheDestroyed()
+        {
+            static thread_local bool destroyed = false;
+            return destroyed;
+        }
+
+        // Owns the cache of one thread. Its destructor runs at thread exit, merges the completed samples
+        // of every live storage into the finished map and marks the cache as gone.
+        struct ThreadCacheOwner
+        {
+            ThreadCacheOwner()
             {
-                for (std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator it = entries.begin(); it != entries.end(); ++it)
-                    Detach(it->second);
+                CachePointer() = new ThreadCache();
             }
+
+            ~ThreadCacheOwner()
+            {
+                ThreadCache* cache = CachePointer();
+                for (ThreadCache::iterator it = cache->begin(); it != cache->end(); ++it)
+                    Detach(it->second);
+                delete cache;
+                CachePointer() = NULL;
+                CacheDestroyed() = true;
+            }
+
+            ThreadCacheOwner(const ThreadCacheOwner&) = delete;
+            ThreadCacheOwner& operator = (const ThreadCacheOwner&) = delete;
         };
 
         static void MergeInto(FunctionMap& target, const FunctionMap& source)
@@ -763,30 +792,42 @@ namespace Cpl
             state->threads.erase(entry.key);
         }
 
-        CPL_INLINE ThreadData& ThisThread()
+        // Registers a new record for this thread in the live threads and returns its cache entry.
+        CPL_INLINE ThreadCacheEntry Register()
         {
-            static thread_local ThreadCache cache;
-            std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator it = cache.entries.find(this);
-            if (it != cache.entries.end() && OwnsEntry(it->second))
-                return *it->second.data;
-            for (std::unordered_map<const PerformanceStorage*, ThreadCacheEntry>::iterator stale = cache.entries.begin(); stale != cache.entries.end();)
-            {
-                if (stale->second.state.expired())
-                    stale = cache.entries.erase(stale);
-                else
-                    ++stale;
-            }
-            // The cache slot is created first and filled last: if the registration below throws, the slot
-            // stays empty, which OwnsEntry() rejects, the pruning loop above erases and Detach() skips.
-            ThreadCacheEntry& slot = cache.entries[this];
             std::lock_guard<std::mutex> lock(_state->mutex);
             ThreadCacheEntry entry;
             entry.state = _state;
             entry.key = _state->registration++;
             entry.data = std::make_shared<ThreadData>();
             _state->threads[entry.key] = entry.data;
-            slot = entry;
-            return *entry.data;
+            return entry;
+        }
+
+        CPL_INLINE ThreadData& ThisThread()
+        {
+            // After the cache of this thread is gone the record is registered without caching and stays in
+            // the live threads. This check has to precede the definition of the owner: passing through the
+            // definition of a destroyed thread-local object is undefined behaviour.
+            if (CacheDestroyed())
+                return *Register().data;
+            static thread_local ThreadCacheOwner owner;
+            ThreadCache& cache = *CachePointer();
+            ThreadCache::iterator it = cache.find(this);
+            if (it != cache.end() && OwnsEntry(it->second))
+                return *it->second.data;
+            for (ThreadCache::iterator stale = cache.begin(); stale != cache.end();)
+            {
+                if (stale->second.state.expired())
+                    stale = cache.erase(stale);
+                else
+                    ++stale;
+            }
+            // The cache slot is created first and filled last: if the registration throws, the slot stays
+            // empty, which OwnsEntry() rejects, the pruning loop above erases and Detach() skips.
+            ThreadCacheEntry& slot = cache[this];
+            slot = Register();
+            return *slot.data;
         }
     };
 }
