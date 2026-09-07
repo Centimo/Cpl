@@ -44,6 +44,8 @@ namespace Cpl
     *       recursive: a callback may call any method of the same Log, including Write. A writer removed from a callback
     *       receives no further messages, not even the one being dispatched. A callback that writes to the same Log
     *       unconditionally recurses without bound; it has to write only for messages it did not produce itself.
+    *       Callbacks of two Log instances that write into each other can deadlock when the instances are used
+    *       from different threads, as with any pair of locks taken in opposite orders.
     * \note The Log class is compiled only when CPL_LOG_ENABLE is defined. Otherwise the logging macros are empty.
     */
     class Log
