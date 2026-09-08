@@ -150,4 +150,35 @@ namespace Test
             return true;
         });
     }
+
+    //-------------------------------------------------------------------------------------------------
+
+    static void LogRemoveWriterRecomputesLevelWriter(const char*, void*)
+    {
+    }
+
+    bool LogRemoveWriterRecomputesLevelTest(const Options& options)
+    {
+        Cpl::Log log;
+        int errorId = log.AddWriter(Cpl::Log::Error, LogRemoveWriterRecomputesLevelWriter, NULL);
+        int debugId = log.AddWriter(Cpl::Log::Debug, LogRemoveWriterRecomputesLevelWriter, NULL);
+        if (log.MaxLevel() != Cpl::Log::Debug)
+        {
+            CPL_LOG_SS(Error, "LogRemoveWriterRecomputesLevel: MaxLevel() expected Debug after adding writers, got " << log.MaxLevel());
+            return false;
+        }
+        log.RemoveWriter(debugId);
+        if (log.MaxLevel() != Cpl::Log::Error || log.Enable(Cpl::Log::Debug))
+        {
+            CPL_LOG_SS(Error, "LogRemoveWriterRecomputesLevel: MaxLevel() expected Error after removing the Debug writer, got " << log.MaxLevel());
+            return false;
+        }
+        log.RemoveWriter(errorId);
+        if (log.MaxLevel() != Cpl::Log::None || log.Enable(Cpl::Log::Error))
+        {
+            CPL_LOG_SS(Error, "LogRemoveWriterRecomputesLevel: MaxLevel() expected None after removing every writer, got " << log.MaxLevel());
+            return false;
+        }
+        return true;
+    }
 }
