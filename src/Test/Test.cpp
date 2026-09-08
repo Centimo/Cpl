@@ -176,6 +176,7 @@ namespace Test
     TEST_ADD(LogCallbackRaw);
     TEST_ADD(LogDateTime);
     TEST_ADD(LogId);
+    TEST_ADD(LogFileWriterDanglingUserData);
 
     TEST_ADD(ParseUri);
 
