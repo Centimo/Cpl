@@ -30,6 +30,7 @@
 
 #include <mutex>
 #include <map>
+#include <memory>
 #include <thread>
 
 #if defined(CPL_LOG_ENABLE)
@@ -182,19 +183,19 @@ namespace Cpl
         */
         int AddFileWriter(Level level, const String& fileName)
         {
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                _files.emplace_back(std::ofstream(fileName));
-            }
-            if (_files.back().is_open())
-                return AddWriter(level, FileWrite, &_files.back());
-            else
+            std::unique_ptr<std::ofstream> file(new std::ofstream(fileName));
+            if (!file->is_open())
                 return 0;
+            std::lock_guard<std::mutex> lock(_mutex);
+            _writers[++_writerId] = Writer(level, std::move(file));
+            _levelMax = std::max(_levelMax, level);
+            _rawOnly = false;
+            return _writerId;
         }
 
         /*!
         * \fn bool RemoveWriter(int id)
-        * \brief Removes a previously registered writer.
+        * \brief Removes a previously registered writer. The file of a file writer is closed.
         * \param [in] id - Writer identifier returned by AddWriter, AddStdWriter or AddFileWriter.
         * \return true if the writer was found and removed, false otherwise.
         */
@@ -315,7 +316,9 @@ namespace Cpl
                 const Writer& writer = it->second;
                 if (level <= writer.level && (id == -1 || id == it->first))
                 {
-                    if (writer.callback)
+                    if (writer.file)
+                        *writer.file << ss.str() << std::flush;
+                    else if (writer.callback)
                         writer.callback(ss.str().c_str(), writer.userData);
                     else if (writer.callbackRaw)
                         writer.callbackRaw(level, message.c_str(), writer.userData);
@@ -356,6 +359,8 @@ namespace Cpl
             CallbackRaw callbackRaw;
             CallbackRawFunc callbackRawFunc;
             void* userData;
+            // Set for a file writer, which owns its file and closes it when the writer is destroyed.
+            std::unique_ptr<std::ofstream> file;
 
             Writer(Level l = None, Callback c = NULL, CallbackRaw cr = NULL, CallbackRawFunc crf = NULL, void* ud = NULL)
                 : level(l)
@@ -365,6 +370,16 @@ namespace Cpl
                 , userData(ud)
             {
             }
+
+            Writer(Level l, std::unique_ptr<std::ofstream> f)
+                : level(l)
+                , callback(NULL)
+                , callbackRaw(NULL)
+                , callbackRawFunc(NULL)
+                , userData(NULL)
+                , file(std::move(f))
+            {
+            }
         };
         typedef std::map<int, Writer> Writers;
         Writers _writers;
@@ -372,7 +387,6 @@ namespace Cpl
 
         mutable std::mutex _mutex;
         mutable std::map<std::thread::id, String> _prettyThreadNames;
-        mutable std::vector<std::ofstream> _files;
         Level _levelMax;
         Flags _flags;
         bool _rawOnly;
@@ -380,13 +394,6 @@ namespace Cpl
         static void StdWrite(const char* msg, void*)
         {
             std::cout << msg << std::flush;
-        }
-
-        static void FileWrite(const char* msg, void* userData)
-        {
-            std::ofstream& ofs = *(std::ofstream*)userData;
-            if(ofs.is_open())
-                ofs << msg << std::flush;
         }
     };
 }
