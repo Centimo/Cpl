@@ -181,4 +181,43 @@ namespace Test
         }
         return true;
     }
+
+    //-------------------------------------------------------------------------------------------------
+
+    static void LogPrefixSeparatorWriter(const char* msg, void* userData)
+    {
+        String& line = *(String*)userData;
+        line = msg;
+    }
+
+    bool LogPrefixSeparatorTest(const Options& options)
+    {
+        struct Case
+        {
+            Cpl::Log::Flags flags;
+            const char* expected;
+        };
+        // The separator ": " stands between the prefix and the message, and only when a prefix was written.
+        const std::vector<Case> cases =
+        {
+            { Cpl::Log::WritePrefix, "Debug: message\n" },
+            { Cpl::Log::Flags(Cpl::Log::WriteThreadId | Cpl::Log::PrettyThreadId), "[000]: message\n" },
+            { Cpl::Log::Flags(Cpl::Log::WriteThreadId | Cpl::Log::PrettyThreadId | Cpl::Log::WritePrefix), "[000] Debug: message\n" },
+            { Cpl::Log::Flags(0), "message\n" }
+        };
+        for (size_t i = 0; i < cases.size(); ++i)
+        {
+            String line;
+            Cpl::Log log;
+            log.SetFlags(cases[i].flags);
+            log.AddWriter(Cpl::Log::Debug, LogPrefixSeparatorWriter, &line);
+            log.Write(Cpl::Log::Debug, "message");
+            if (line != cases[i].expected)
+            {
+                CPL_LOG_SS(Error, "LogPrefixSeparator: flags " << (int)cases[i].flags << " expected '" << cases[i].expected << "', got '" << line << "'.");
+                return false;
+            }
+        }
+        return true;
+    }
 }
