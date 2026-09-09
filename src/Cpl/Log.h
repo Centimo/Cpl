@@ -202,13 +202,23 @@ namespace Cpl
         bool RemoveWriter(int id)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            if (_writers.find(id) != _writers.end())
-            {
-                _writers.erase(id);
-                return true;
-            }
-            else
+            if (_writers.erase(id) == 0)
                 return false;
+            // The maximum level cannot be lowered by one step: the second highest level of the remaining
+            // writers is not stored anywhere, so both summaries are recomputed from the writers themselves.
+            // They are published once, at the end: Enable() reads the level without the lock and would take
+            // an intermediate value for the answer, dropping a message that a writer still accepts.
+            Level levelMax = None;
+            bool rawOnly = true;
+            for (Writers::const_iterator it = _writers.begin(); it != _writers.end(); ++it)
+            {
+                levelMax = std::max(levelMax, it->second.level);
+                if (it->second.callback || it->second.file)
+                    rawOnly = false;
+            }
+            _levelMax = levelMax;
+            _rawOnly = rawOnly;
+            return true;
         }
 
         /*!
