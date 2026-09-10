@@ -179,6 +179,7 @@ namespace Test
     TEST_ADD(LogFileWriterDanglingUserData);
     TEST_ADD(LogRemoveWriterRecomputesLevel);
     TEST_ADD(LogPrefixSeparator);
+    TEST_ADD(LogConcurrentFlags);
 
     TEST_ADD(ParseUri);
 
