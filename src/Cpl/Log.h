@@ -269,22 +269,25 @@ namespace Cpl
 
             if (!_rawOnly)
             {
-                bool pref = false;
+                // Every part of the prefix writes a separating space before itself when the prefix is not
+                // empty yet, and reports the prefix as written; the terminating ": " is written for a
+                // prefix that is not empty.
+                bool prefixWritten = false;
                 if (_flags & WriteDate)
                 {
                     ss << CurrentDateTimeString(true, false);
-                    pref = true;
+                    prefixWritten = true;
                 }
                 if (_flags & WriteTime)
                 {
-                    if (pref)
+                    if (prefixWritten)
                         ss << " ";
                     ss << CurrentDateTimeString(false, true);
-                    pref = true;
+                    prefixWritten = true;
                 }
                 if (_flags & WriteThreadId)
                 {
-                    if (pref)
+                    if (prefixWritten)
                         ss << " ";
                     std::thread::id id = std::this_thread::get_id();
                     if (_flags & PrettyThreadId)
@@ -296,11 +299,11 @@ namespace Cpl
                     }
                     else
                         ss << "[" << id << "]";
-                    pref = true;
+                    prefixWritten = true;
                 }
                 if (_flags & WritePrefix)
                 {
-                    if (pref)
+                    if (prefixWritten)
                         ss << " ";
                     level = std::min(level, Debug);
                     static const String prefixes[] = { "None", "Error", "Warning", "Info", "Verbose", "Debug" };
@@ -312,8 +315,9 @@ namespace Cpl
                     }
                     else
                         ss << prefixes[level];
+                    prefixWritten = true;
                 }
-                if (pref)
+                if (prefixWritten)
                     ss << ": ";
 
                 ss << message;
