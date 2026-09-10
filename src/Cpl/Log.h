@@ -28,6 +28,7 @@
 #include "Cpl/String.h"
 #include "Cpl/Console.h"
 
+#include <atomic>
 #include <mutex>
 #include <map>
 #include <memory>
@@ -126,7 +127,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, callback, NULL, NULL, userData);
-            _levelMax = std::max(_levelMax, level);
+            _levelMax = std::max<Level>(_levelMax, level);
             _rawOnly = false;
             return _writerId;
         }
@@ -143,7 +144,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, callbackRaw, NULL, userData);
-            _levelMax = std::max(_levelMax, level);
+            _levelMax = std::max<Level>(_levelMax, level);
             return _writerId;
         }
 
@@ -159,7 +160,7 @@ namespace Cpl
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, NULL, NULL, callbackRaw, userData);
-            _levelMax = std::max(_levelMax, level);
+            _levelMax = std::max<Level>(_levelMax, level);
             return _writerId;
         }
 
@@ -188,7 +189,7 @@ namespace Cpl
                 return 0;
             std::lock_guard<std::mutex> lock(_mutex);
             _writers[++_writerId] = Writer(level, std::move(file));
-            _levelMax = std::max(_levelMax, level);
+            _levelMax = std::max<Level>(_levelMax, level);
             _rawOnly = false;
             return _writerId;
         }
@@ -246,10 +247,13 @@ namespace Cpl
         * \brief Checks whether a message of the given severity would be written.
         * \param [in] level - Severity to check.
         * \return true if level is not None and is less or equal to the maximum registered writer level.
+        * \note The level is read without the lock, so the answer can be stale while writers are added or
+        *       removed. Write() checks the level of every writer again under the lock, so a stale answer
+        *       costs an unnecessary lock and never sends a message to a writer that no longer accepts it.
         */
         CPL_INLINE bool Enable(Level level) const
         {
-            return level != None && _levelMax >= level;
+            return level != None && _levelMax.load(std::memory_order_relaxed) >= level;
         }
 
         /*!
@@ -265,32 +269,36 @@ namespace Cpl
             if (!Enable(level))
                 return;
 
+            // The flags are taken once and the whole message is built from that one set: read field by field,
+            // they can change between the parts of the prefix and produce a line that no set of flags describes.
+            const Flags flags = _flags.load(std::memory_order_relaxed);
+            const bool formatted = !_rawOnly.load(std::memory_order_relaxed);
             std::stringstream ss;
 
-            if (!_rawOnly)
+            if (formatted)
             {
                 // Every part of the prefix writes a separating space before itself when the prefix is not
                 // empty yet, and reports the prefix as written; the terminating ": " is written for a
                 // prefix that is not empty.
                 bool prefixWritten = false;
-                if (_flags & WriteDate)
+                if (flags & WriteDate)
                 {
                     ss << CurrentDateTimeString(true, false);
                     prefixWritten = true;
                 }
-                if (_flags & WriteTime)
+                if (flags & WriteTime)
                 {
                     if (prefixWritten)
                         ss << " ";
                     ss << CurrentDateTimeString(false, true);
                     prefixWritten = true;
                 }
-                if (_flags & WriteThreadId)
+                if (flags & WriteThreadId)
                 {
                     if (prefixWritten)
                         ss << " ";
                     std::thread::id id = std::this_thread::get_id();
-                    if (_flags & PrettyThreadId)
+                    if (flags & PrettyThreadId)
                     {
                         std::lock_guard<std::mutex> lock(_mutex);
                         if (_prettyThreadNames.find(id) == _prettyThreadNames.end())
@@ -301,13 +309,13 @@ namespace Cpl
                         ss << "[" << id << "]";
                     prefixWritten = true;
                 }
-                if (_flags & WritePrefix)
+                if (flags & WritePrefix)
                 {
                     if (prefixWritten)
                         ss << " ";
                     level = std::min(level, Debug);
                     static const String prefixes[] = { "None", "Error", "Warning", "Info", "Verbose", "Debug" };
-                    if (_flags & ColorezedPrefix)
+                    if (flags & ColorezedPrefix)
                     {
                         using namespace Console;
                         static Foreground colors[] = { ForegroundBlack, ForegroundLightRed, ForegroundYellow, ForegroundGreen, ForegroundWhite, ForegroundLightGray };
@@ -330,6 +338,10 @@ namespace Cpl
                 const Writer& writer = it->second;
                 if (level <= writer.level && (id == -1 || id == it->first))
                 {
+                    // A writer that takes a formatted line while the message was built without one was
+                    // registered after the decision not to format: treat it as not registered yet.
+                    if ((writer.file || writer.callback) && !formatted)
+                        continue;
                     if (writer.file)
                         *writer.file << ss.str() << std::flush;
                     else if (writer.callback)
@@ -351,7 +363,7 @@ namespace Cpl
         */
         Level MaxLevel() const
         {
-            return _levelMax;
+            return _levelMax.load(std::memory_order_relaxed);
         }
 
         /*!
@@ -401,9 +413,11 @@ namespace Cpl
 
         mutable std::mutex _mutex;
         mutable std::map<std::thread::id, String> _prettyThreadNames;
-        Level _levelMax;
-        Flags _flags;
-        bool _rawOnly;
+        // Written under _mutex and read by Enable() without it, hence atomic.
+        std::atomic<Level> _levelMax;
+        // Read by Write() without the lock, so that a message is formatted outside it.
+        std::atomic<Flags> _flags;
+        std::atomic<bool> _rawOnly;
 
         static void StdWrite(const char* msg, void*)
         {
