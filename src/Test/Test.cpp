@@ -180,6 +180,7 @@ namespace Test
     TEST_ADD(LogRemoveWriterRecomputesLevel);
     TEST_ADD(LogPrefixSeparator);
     TEST_ADD(LogConcurrentFlags);
+    TEST_ADD(LogReentrantCallback);
 
     TEST_ADD(ParseUri);
 
