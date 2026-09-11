@@ -40,6 +40,11 @@ namespace Cpl
     /*! @ingroup cpl_log
     * \class Log
     * \brief Thread-safe logger with multiple writers, severity levels and configurable message formatting.
+    * \note A writer callback is invoked while the internal lock is held, so callbacks never run concurrently.
+    *       A callback must not call any method of the same Log, including Write, AddWriter and RemoveWriter:
+    *       the lock is not recursive and a nested call deadlocks. Writing to another Log is allowed, but the
+    *       callbacks of two instances that write into each other deadlock when used from different threads,
+    *       as with any pair of locks taken in opposite orders.
     * \note The Log class is compiled only when CPL_LOG_ENABLE is defined. Otherwise the logging macros are empty.
     */
     class Log

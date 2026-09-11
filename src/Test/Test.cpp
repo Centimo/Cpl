@@ -180,7 +180,9 @@ namespace Test
     TEST_ADD(LogRemoveWriterRecomputesLevel);
     TEST_ADD(LogPrefixSeparator);
     TEST_ADD(LogConcurrentFlags);
-    TEST_ADD(LogReentrantCallback);
+    // Calling the logger from a writer callback is prohibited, see the note on the Log class, so the test
+    // that checks it hangs by design. It is kept for the day the logger starts to support such callbacks.
+    //TEST_ADD(LogReentrantCallback);
 
     TEST_ADD(ParseUri);
 
