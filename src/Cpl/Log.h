@@ -458,9 +458,9 @@ namespace Cpl
 */
 #define CPL_LOG_SS(level, msg) \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str()); \
+        std::stringstream cplLogMacroStream; \
+        cplLogMacroStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogMacroStream.str()); \
     }
 
 /*! @ingroup cpl_log
@@ -472,9 +472,9 @@ namespace Cpl
 */
 #define CPL_LOG_SS_ID(level, msg, id) \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str(), id); \
+        std::stringstream cplLogMacroStream; \
+        cplLogMacroStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogMacroStream.str(), id); \
     }
 
 /*! @ingroup cpl_log
@@ -487,9 +487,9 @@ namespace Cpl
 #define CPL_IF_LOG_SS(cond, level, msg) \
     if(cond) \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str()); \
+        std::stringstream cplLogMacroStream; \
+        cplLogMacroStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogMacroStream.str()); \
     }
 
 /*! @ingroup cpl_log
@@ -503,9 +503,9 @@ namespace Cpl
 #define CPL_IF_LOG_SS_ID(cond, level, msg, id) \
     if(cond) \
     { \
-        std::stringstream __ss; \
-        __ss << msg; \
-        Cpl::Log::Global().Write(Cpl::Log::level, __ss.str(), id); \
+        std::stringstream cplLogMacroStream; \
+        cplLogMacroStream << msg; \
+        Cpl::Log::Global().Write(Cpl::Log::level, cplLogMacroStream.str(), id); \
     }
 
 #else
